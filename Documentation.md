@@ -60,7 +60,7 @@ cursor.close()
 conn.close()
 
 print(f"Inserted {count} records into bonap_all_natives.")
-```python
+```
 
 **Download USDA file (need to apply the USDA code to the BONAP data)**
 https://plants.usda.gov/downloads
@@ -139,6 +139,5 @@ cursor.close()
 conn.close()
 
 print(f"Done. Inserted/Updated {total_inserted} records into usda_plantlist.")
-```python
-
+```
 
