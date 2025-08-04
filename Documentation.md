@@ -6,7 +6,7 @@ Hide: Infraspecific Taxa
 Unhide: Common Name
 10000 taxa per page
 Run query,
-Copy results to Excel, export to txt.
+Copy results to Excel, export to tab delimited txt.
 Approx 19565 plants.
 
 **Python Script to load to mysql**
