@@ -140,4 +140,68 @@ conn.close()
 
 print(f"Done. Inserted/Updated {total_inserted} records into usda_plantlist.")
 ```
+Add columns scientific_name and author to usda_plantlist and populate them.
 
+sql```
+ALTER TABLE usda_plantlist
+ADD COLUMN scientific_name VARCHAR(255),
+ADD COLUMN author VARCHAR(255);
+
+
+use nativeplants;
+-- Corrected SQL UPDATE statement to populate the 'scientific_name' and 'author' columns
+-- based on the 'scientific_name_with_author' column.
+--
+-- Logic:
+-- 1. The first word is always part of the scientific name.
+-- 2. The second word is added to the scientific name under two conditions:
+--    a. It starts with a lowercase character.
+--    b. It starts with the '×' character.
+-- 3. The '×' character is removed from the final scientific name string.
+-- 4. The remaining words are assigned to the 'author' column.
+
+UPDATE usda_plantlist
+SET
+    -- First, we determine the 'scientific_name'.
+    -- The CASE statement checks for two conditions to determine if the second word
+    -- should be included. Then, the REPLACE function removes all '×' characters.
+    scientific_name = REPLACE(
+        TRIM(
+            CASE
+                -- Check if a second word exists and if it starts with '×' or a lowercase character.
+                WHEN
+                    LOCATE(' ', scientific_name_with_author) > 0 AND
+                    (SUBSTRING(scientific_name_with_author, LOCATE(' ', scientific_name_with_author) + 1, 1) = '×' OR
+                     ASCII(SUBSTRING(scientific_name_with_author, LOCATE(' ', scientific_name_with_author) + 1, 1)) BETWEEN 97 AND 122)
+                THEN
+                    -- If so, concatenate the first two words.
+                    SUBSTRING_INDEX(scientific_name_with_author, ' ', 2)
+                ELSE
+                    -- Otherwise, only use the first word as the scientific name.
+                    SUBSTRING_INDEX(scientific_name_with_author, ' ', 1)
+            END
+        ),
+        '×',
+        ''
+    ),
+    -- Next, we determine the 'author' based on the same conditions as the scientific name.
+    author = TRIM(
+        CASE
+            -- Check if the second word starts with '×' or a lowercase character.
+            WHEN
+                LOCATE(' ', scientific_name_with_author) > 0 AND
+                (SUBSTRING(scientific_name_with_author, LOCATE(' ', scientific_name_with_author) + 1, 1) = '×' OR
+                 ASCII(SUBSTRING(scientific_name_with_author, LOCATE(' ', scientific_name_with_author) + 1, 1)) BETWEEN 97 AND 122)
+            THEN
+                -- If the second word is part of the scientific name, the author starts after the second space.
+                SUBSTRING(scientific_name_with_author,
+                    LOCATE(' ', scientific_name_with_author, LOCATE(' ', scientific_name_with_author) + 1) + 1)
+            ELSE
+                -- Otherwise, if only the first word is the scientific name, the author starts after the first space.
+                SUBSTRING(scientific_name_with_author,
+                    LOCATE(' ', scientific_name_with_author) + 1)
+        END
+    );
+
+
+```
