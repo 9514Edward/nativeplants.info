@@ -10,6 +10,7 @@ Copy results to Excel, export to txt.
 Approx 19565 plants.
 
 **Python Script to load to mysql**
+```python
 import mysql.connector
 import csv
 
@@ -59,6 +60,7 @@ cursor.close()
 conn.close()
 
 print(f"Inserted {count} records into bonap_all_natives.")
+```python
 
 **Download USDA file (need to apply the USDA code to the BONAP data)**
 https://plants.usda.gov/downloads
@@ -75,6 +77,7 @@ CREATE TABLE usda_plantlist (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 **Python Script to upload USDA data**
+```python
 import mysql.connector
 import csv
 
@@ -136,6 +139,6 @@ cursor.close()
 conn.close()
 
 print(f"Done. Inserted/Updated {total_inserted} records into usda_plantlist.")
-
+```python
 
 
