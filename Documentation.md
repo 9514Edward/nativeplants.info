@@ -142,7 +142,7 @@ print(f"Done. Inserted/Updated {total_inserted} records into usda_plantlist.")
 ```
 Add columns scientific_name and author to usda_plantlist and populate them.
 
-sql```
+```sql
 ALTER TABLE usda_plantlist
 ADD COLUMN scientific_name VARCHAR(255),
 ADD COLUMN author VARCHAR(255);
