@@ -68,14 +68,19 @@ click on Download Complete Plants Checklist (includes subspecies and non natives
 Right click and select Save As.
 
 **Create the table **
-CREATE TABLE usda_plantlist (
-    symbol VARCHAR(20) NOT NULL PRIMARY KEY,
-    synonym_symbol VARCHAR(20),
-    scientific_name_with_author VARCHAR(255) NOT NULL,
-    common_name VARCHAR(255),
-    family VARCHAR(100)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
+CREATE TABLE `usda_plantlist` (
+  `symbol` varchar(20) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `synonym_symbol` varchar(20) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `scientific_name_with_author` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `common_name` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `family` varchar(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `author` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `scientific_name` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  KEY `scientific_name` (`scientific_name`),
+  KEY `symbol` (`symbol`),
+  KEY `x_common_name` (`common_name`),
+  KEY `x_name_author` (`scientific_name_with_author`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 **Python Script to upload USDA data**
 ```python
 import mysql.connector
