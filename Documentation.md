@@ -221,3 +221,37 @@ SET
 
 
 ```
+**Link the two tables
+```sql
+use nativeplants;
+
+SET SESSION innodb_lock_wait_timeout = 6000;
+-- This script provides a more robust, step-by-step approach to matching plant names
+-- between the bonap_all_natives and usda_plantlist tables.
+-- It prioritizes exact matches before moving to fuzzy matches to maximize accuracy.
+
+-- First, clear the usda_code and needs_review columns to start with a clean slate.
+-- This is a good practice before running a new matching process.
+UPDATE bonap_all_natives
+SET usda_code = NULL, needs_review = NULL;
+
+commit;
+
+update bonap_all_natives set scientific_name = replace(scientific_name,'×','');
+commit;
+UPDATE bonap_all_natives bonap
+JOIN usda_plantlist usda
+  ON usda.scientific_name = bonap.scientific_name
+SET bonap.usda_code = usda.symbol;
+
+
+
+commit;
+UPDATE bonap_all_natives bonap
+JOIN usda_plantlist usda
+  ON usda.common_name = bonap.common_name
+SET bonap.usda_code = usda.symbol
+WHERE bonap.usda_code IS NULL;
+commit;
+
+```
