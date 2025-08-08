@@ -10,10 +10,8 @@ Copy results to Excel, export to tab delimited txt.
 Approx 19565 plants.
 
 **Python Script to load to mysql**
-```python
-import mysql.connector
-import csv
 
+```sql
 # Create the table:
 CREATE TABLE `bonap_all_natives` (
   `scientific_name` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
@@ -23,6 +21,12 @@ CREATE TABLE `bonap_all_natives` (
   KEY `idx_bonap_scientific_name` (`scientific_name`),
   KEY `idx_bonap_common_name` (`common_name`)
 ) ENGINE=InnoDB  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+```
+
+```python
+import mysql.connector
+import csv
+
 
 # Database connection configuration
 db_config = {
@@ -69,7 +73,10 @@ https://plants.usda.gov/downloads
 click on Download Complete Plants Checklist (includes subspecies and non natives)
 Right click and select Save As.
 
+
 **Create the table **
+
+```sql
 CREATE TABLE `usda_plantlist` (
   `symbol` varchar(20) CHARACTER SET utf8mb3 DEFAULT NULL,
   `synonym_symbol` varchar(20) CHARACTER SET utf8mb3 DEFAULT NULL,
@@ -83,6 +90,8 @@ CREATE TABLE `usda_plantlist` (
   KEY `x_common_name` (`common_name`),
   KEY `x_name_author` (`scientific_name_with_author`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+```
+
 **Python Script to upload USDA data**
 ```python
 import mysql.connector
