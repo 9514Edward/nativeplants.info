@@ -160,9 +160,6 @@ Add columns scientific_name and author to usda_plantlist and populate them.
 
 ```sql
 ALTER TABLE usda_plantlist
-ADD COLUMN scientific_name VARCHAR(255),
-ADD COLUMN author VARCHAR(255);
-
 
 use nativeplants;
 -- Corrected SQL UPDATE statement to populate the 'scientific_name' and 'author' columns
