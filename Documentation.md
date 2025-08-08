@@ -14,13 +14,14 @@ Approx 19565 plants.
 ```sql
 # Create the table:
 CREATE TABLE `bonap_all_natives` (
-  `scientific_name` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
-  `common_name` varchar(255) CHARACTER SET utf8mb3 DEFAULT NULL,
-  `usda_code` varchar(45) CHARACTER SET utf8mb3 DEFAULT NULL,
-  `needs_review` tinyint DEFAULT NULL,
+  `scientific_name` VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `common_name`     VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `usda_code`       VARCHAR(45)  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `needs_review`    TINYINT(1) DEFAULT 0,
   KEY `idx_bonap_scientific_name` (`scientific_name`),
   KEY `idx_bonap_common_name` (`common_name`)
-) ENGINE=InnoDB  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
 ```python
@@ -78,18 +79,20 @@ Right click and select Save As.
 
 ```sql
 CREATE TABLE `usda_plantlist` (
-  `symbol` varchar(20) CHARACTER SET utf8mb3 DEFAULT NULL,
-  `synonym_symbol` varchar(20) CHARACTER SET utf8mb3 DEFAULT NULL,
-  `scientific_name_with_author` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
-  `common_name` varchar(255) CHARACTER SET utf8mb3 DEFAULT NULL,
-  `family` varchar(100) COLLATE CHARACTER SET utf8mb3 DEFAULT NULL,
-  `author` varchar(255) COLLATE CHARACTER SET utf8mb3 DEFAULT NULL,
-  `scientific_name` varchar(255) COLLATE CHARACTER SET utf8mb3 DEFAULT NULL,
+  `symbol`                       VARCHAR(20)  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `synonym_symbol`                VARCHAR(20)  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `scientific_name_with_author`   VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `common_name`                   VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `family`                        VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `author`                        VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `scientific_name`               VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   KEY `scientific_name` (`scientific_name`),
   KEY `symbol` (`symbol`),
   KEY `x_common_name` (`common_name`),
   KEY `x_name_author` (`scientific_name_with_author`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 ```
 
 **Python Script to upload USDA data**
