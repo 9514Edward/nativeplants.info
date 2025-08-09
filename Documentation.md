@@ -573,7 +573,6 @@ INSERT IGNORE INTO state_region (state_name, state_code, country_code)
 SELECT DISTINCT 
     state,
     CASE 
-        -- United States
         WHEN state = 'Alabama' THEN 'AL'
         WHEN state = 'Alaska' THEN 'AK'
         WHEN state = 'Arizona' THEN 'AZ'
@@ -625,8 +624,6 @@ SELECT DISTINCT
         WHEN state = 'West Virginia' THEN 'WV'
         WHEN state = 'Wisconsin' THEN 'WI'
         WHEN state = 'Wyoming' THEN 'WY'
-
-        -- Canada
         WHEN state = 'Alberta' THEN 'AB'
         WHEN state = 'British Columbia' THEN 'BC'
         WHEN state = 'Manitoba' THEN 'MB'
@@ -640,8 +637,6 @@ SELECT DISTINCT
         WHEN state = 'Quebec' THEN 'QC'
         WHEN state = 'Saskatchewan' THEN 'SK'
         WHEN state = 'Yukon' THEN 'YT'
-
-        -- Mexico
         WHEN state = 'Aguascalientes' THEN 'AGU'
         WHEN state = 'Baja California' THEN 'BCN'
         WHEN state = 'Baja California Sur' THEN 'BCS'
