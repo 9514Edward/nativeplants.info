@@ -248,5 +248,436 @@ JOIN usda_plantlist usda
 SET bonap.usda_code = usda.symbol
 WHERE bonap.usda_code IS NULL;
 commit;
+```
 
+**Get a default image from mediapedia and scrape data from USDA**
+
+```python
+import os
+import json
+import time
+import glob
+import csv
+import requests
+import mysql.connector
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+# ---- CONFIGURATION ----
+download_dir = r"C:\Users\User\Documents\USANativePlantFinder\distribution"
+csv_file_path = os.path.join(download_dir, "plant_data.csv")
+image_cache_path = r"C:\Users\User\Documents\USANativePlantFinder\image_cache.json"
+usda_cache_path = r"C:\Users\User\Documents\USANativePlantFinder\usda_cache.json"
+
+MYSQL_CONFIG = {
+    "host": "rizz2.cyax1patkaio.us-east-1.rds.amazonaws.com",
+    "user": "c6xvsSTa",
+    "password": "dhqDjL,vw7t!y%RY",
+    "database": "nativeplants",
+}
+
+# Load caches or initialize empty
+if os.path.exists(usda_cache_path):
+    with open(usda_cache_path, 'r', encoding='utf-8') as f:
+        usda_cache = json.load(f)
+else:
+    usda_cache = {}
+
+if os.path.exists(image_cache_path):
+    with open(image_cache_path, 'r', encoding='utf-8') as f:
+        image_cache = json.load(f)
+else:
+    image_cache = {}
+
+# Selenium setup
+options = Options()
+options.add_argument("--headless")
+options.add_argument("--disable-gpu")
+prefs = {
+    "download.default_directory": download_dir,
+    "download.prompt_for_download": False,
+    "download.directory_upgrade": True,
+    "safebrowsing.enabled": True
+}
+options.add_experimental_option("prefs", prefs)
+driver = webdriver.Chrome(options=options)
+
+def insert_ignore(cursor, query, params):
+    try:
+        cursor.execute(query, params)
+    except mysql.connector.Error as err:
+        print(f"MySQL Error: {err}")
+
+def get_commons_thumbnail_cached(search_term, width=200):
+    if search_term in image_cache:
+        return image_cache[search_term]
+    print(f"Searching image for: {search_term}")
+    search_url = "https://commons.wikimedia.org/w/api.php"
+    params = {
+        "action": "query",
+        "format": "json",
+        "prop": "pageimages",
+        "generator": "search",
+        "gsrsearch": f'intitle:"{search_term}" insource:"{search_term}"',
+        "gsrlimit": 1,
+        "piprop": "thumbnail",
+        "pithumbsize": width,
+    }
+    try:
+        response = requests.get(search_url, params=params, timeout=10)
+        data = response.json()
+        pages = data.get("query", {}).get("pages", {})
+        for page in pages.values():
+            thumbnail = page.get("thumbnail", {}).get("source")
+            if thumbnail:
+                image_cache[search_term] = thumbnail
+                return thumbnail
+    except Exception as e:
+        print(f"Error fetching image for {search_term}: {e}")
+    image_cache[search_term] = ""
+    return None
+
+def download_distribution_csv(symbol, scientific_name, common_name):
+    """
+    Scrapes USDA metadata tables and distribution CSV from the plant profile page.
+    Returns metadata dict on success or None on failure.
+    """
+    url = f"https://plants.sc.egov.usda.gov/plant-profile/{symbol}"
+    driver.get(url)
+
+    try:
+        # Wait for the metadata section to load
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "general-info"))
+        )
+
+        metadata = {}
+
+        # Scrape main metadata table
+        table = driver.find_element(By.CSS_SELECTOR, "table.usa-table.margin-top-0")
+        rows = table.find_elements(By.TAG_NAME, "tr")
+        for row in rows:
+            th = row.find_element(By.TAG_NAME, "th")
+            td = row.find_element(By.TAG_NAME, "td")
+            key = th.find_element(By.TAG_NAME, "h3").text.strip().lower().replace(" ", "_")
+            spans = td.find_elements(By.TAG_NAME, "span")
+            if spans:
+                value = " | ".join(span.text.strip() for span in spans if span.text.strip())
+            else:
+                value = td.text.strip()
+            metadata[key] = value
+
+        # Scrape classification table
+        classification_table = driver.find_element(By.CSS_SELECTOR, "table.classification-table")
+        rows = classification_table.find_elements(By.TAG_NAME, "tr")
+        for row in rows:
+            th = row.find_element(By.TAG_NAME, "th")
+            td = row.find_element(By.TAG_NAME, "td")
+            key = th.find_element(By.TAG_NAME, "h3").text.strip().lower().replace(" ", "_")
+            spans = td.find_elements(By.TAG_NAME, "span")
+            texts = [span.text.strip() for span in spans if span.text.strip()]
+            metadata[key] = " | ".join(texts)
+
+        # Add scientific_name and common_name from params (not scraped)
+        metadata["scientific_name"] = scientific_name
+        metadata["common_name"] = common_name
+
+        print(f"Scraped metadata for {symbol}: {metadata}")
+
+        # Download distribution CSV
+        first_button = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.LINK_TEXT, "Download Distribution Data"))
+        )
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_button)
+        time.sleep(0.5)
+        driver.execute_script("arguments[0].click();", first_button)
+        print(f"📥 Opened download panel for {symbol}")
+
+        second_link = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "//a[@download='DistributionData.csv']"))
+        )
+        blob_url = second_link.get_attribute("href")
+
+        csv_data = driver.execute_async_script("""
+            const url = arguments[0];
+            const callback = arguments[1];
+            fetch(url)
+                .then(r => r.blob())
+                .then(blob => blob.text())
+                .then(text => callback(text))
+                .catch(err => callback(null));
+        """, blob_url)
+
+        if not csv_data:
+            raise Exception("Failed to retrieve CSV from blob URL.")
+
+        csv_text = csv_data.lstrip("\ufeff")
+        lines = csv_text.splitlines()
+        if lines and lines[0].strip().lower().startswith("distribution data"):
+            lines = lines[1:]
+
+        csv_reader = csv.DictReader(lines)
+        dist_rows = [
+            (
+                row.get("Symbol", ""),
+                row.get("Country", ""),
+                row.get("State", ""),
+                row.get("State FIP", ""),
+                row.get("County", ""),
+                row.get("County FIP", "")
+            )
+            for row in csv_reader
+        ]
+
+        # Add distribution rows to metadata so caller can insert them later
+        metadata["distribution_rows"] = dist_rows
+
+        return metadata
+
+    except Exception as e:
+        print(f"⚠️ Failed to load data for {symbol}: {e}")
+        return None
+
+def main():
+    # DB connection
+    conn = mysql.connector.connect(**MYSQL_CONFIG)
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        cursor.execute("SELECT * FROM bonap_all_natives WHERE usda_code IS NOT NULL ORDER BY usda_code")
+        plants = cursor.fetchall()
+
+        for plant in plants:
+            symbol = plant.get("usda_code")
+            scientific_name = plant.get("scientific_name")
+            common_name = plant.get("common_name")
+
+            # Get cached or fetch Wikimedia image
+            image_url = plant.get("image", "").strip()
+            if not image_url:
+                image_url = get_commons_thumbnail_cached(scientific_name)
+
+            # Insert basic plant info
+            insert_ignore(cursor,
+                """
+                INSERT IGNORE INTO plants (usda_symbol, scientific_name, common_name)
+                VALUES (%s, %s, %s)
+                """,
+                (symbol, scientific_name, common_name)
+            )
+
+            # Get plant_id from usda_plantlist for linking
+            cursor.execute("SELECT DISTINCT symbol FROM usda_plantlist WHERE symbol = %s", (symbol,))
+            row = cursor.fetchone()
+            plant_id = row["symbol"] if row else None
+
+            if plant_id and image_url:
+                insert_ignore(cursor,
+                    """
+                    INSERT IGNORE INTO plant_images (plant_id, image_url, source)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (plant_id, image_url, "wikimedia")
+                )
+
+            # Scrape USDA metadata + distribution CSV
+            metadata = download_distribution_csv(symbol, scientific_name, common_name)
+            if metadata:
+                # Insert/update plants table with USDA metadata
+                try:
+                    cursor.execute("""
+                        INSERT INTO plants (
+                            usda_symbol, scientific_name, common_name,
+                            usda_group, usda_duration, usda_growth_habit, usda_native_status,
+                            usda_kingdom, usda_subkingdom, usda_superdivision, usda_division,
+                            usda_class, usda_subclass, usda_order, usda_family, usda_genus, usda_species
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            scientific_name=VALUES(scientific_name),
+                            common_name=VALUES(common_name),
+                            usda_group=VALUES(usda_group),
+                            usda_duration=VALUES(usda_duration),
+                            usda_growth_habit=VALUES(usda_growth_habit),
+                            usda_native_status=VALUES(usda_native_status),
+                            usda_kingdom=VALUES(usda_kingdom),
+                            usda_subkingdom=VALUES(usda_subkingdom),
+                            usda_superdivision=VALUES(usda_superdivision),
+                            usda_division=VALUES(usda_division),
+                            usda_class=VALUES(usda_class),
+                            usda_subclass=VALUES(usda_subclass),
+                            usda_order=VALUES(usda_order),
+                            usda_family=VALUES(usda_family),
+                            usda_genus=VALUES(usda_genus),
+                            usda_species=VALUES(usda_species)
+                    """, (
+                        symbol,
+                        metadata.get("scientific_name"),
+                        metadata.get("common_name"),
+                        metadata.get("group"),
+                        metadata.get("duration"),
+                        metadata.get("growth_habits") or metadata.get("growth_habit"),  # fix key name
+                        metadata.get("native_status"),
+                        metadata.get("kingdom"),
+                        metadata.get("subkingdom"),
+                        metadata.get("superdivision"),
+                        metadata.get("division"),
+                        metadata.get("class"),
+                        metadata.get("subclass"),
+                        metadata.get("order"),
+                        metadata.get("family"),
+                        metadata.get("genus"),
+                        metadata.get("species")
+                    ))
+                except mysql.connector.Error as err:
+                    print(f"❌ DB error for {symbol}: {err}")
+
+                # Remove old distribution data
+                cursor.execute("DELETE FROM usda_distribution WHERE `Symbol` = %s", (symbol,))
+                # Insert new distribution data rows
+                dist_rows = metadata.get("distribution_rows", [])
+                if dist_rows:
+                    cursor.executemany("""
+                        INSERT INTO usda_distribution
+                            (`Symbol`, `Country`, `State`, `State FIP`, `County`, `County FIP`)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, dist_rows)
+
+            conn.commit()
+
+    finally:
+        cursor.close()
+        conn.close()
+        driver.quit()
+
+    # Save caches
+    with open(image_cache_path, 'w', encoding='utf-8') as f:
+        json.dump(image_cache, f, indent=2, ensure_ascii=False)
+    with open(usda_cache_path, 'w', encoding='utf-8') as f:
+        json.dump(usda_cache, f, indent=2, ensure_ascii=False)
+
+    print("✅ Plants inserted with image and USDA data.")
+
+if __name__ == "__main__":
+    main()
+
+
+```
+
+**Populate state_region and other data fixes/initializations**
+
+
+INSERT IGNORE INTO state_region (state_name, state_code, country_code)
+SELECT DISTINCT 
+    state,
+    CASE 
+        -- United States
+        WHEN state = 'Alabama' THEN 'AL'
+        WHEN state = 'Alaska' THEN 'AK'
+        WHEN state = 'Arizona' THEN 'AZ'
+        WHEN state = 'Arkansas' THEN 'AR'
+        WHEN state = 'California' THEN 'CA'
+        WHEN state = 'Colorado' THEN 'CO'
+        WHEN state = 'Connecticut' THEN 'CT'
+        WHEN state = 'Delaware' THEN 'DE'
+        WHEN state = 'District of Columbia' THEN 'DC'
+        WHEN state = 'Florida' THEN 'FL'
+        WHEN state = 'Georgia' THEN 'GA'
+        WHEN state = 'Hawaii' THEN 'HI'
+        WHEN state = 'Idaho' THEN 'ID'
+        WHEN state = 'Illinois' THEN 'IL'
+        WHEN state = 'Indiana' THEN 'IN'
+        WHEN state = 'Iowa' THEN 'IA'
+        WHEN state = 'Kansas' THEN 'KS'
+        WHEN state = 'Kentucky' THEN 'KY'
+        WHEN state = 'Louisiana' THEN 'LA'
+        WHEN state = 'Maine' THEN 'ME'
+        WHEN state = 'Maryland' THEN 'MD'
+        WHEN state = 'Massachusetts' THEN 'MA'
+        WHEN state = 'Michigan' THEN 'MI'
+        WHEN state = 'Minnesota' THEN 'MN'
+        WHEN state = 'Mississippi' THEN 'MS'
+        WHEN state = 'Missouri' THEN 'MO'
+        WHEN state = 'Montana' THEN 'MT'
+        WHEN state = 'Nebraska' THEN 'NE'
+        WHEN state = 'Nevada' THEN 'NV'
+        WHEN state = 'New Hampshire' THEN 'NH'
+        WHEN state = 'New Jersey' THEN 'NJ'
+        WHEN state = 'New Mexico' THEN 'NM'
+        WHEN state = 'New York' THEN 'NY'
+        WHEN state = 'North Carolina' THEN 'NC'
+        WHEN state = 'North Dakota' THEN 'ND'
+        WHEN state = 'Ohio' THEN 'OH'
+        WHEN state = 'Oklahoma' THEN 'OK'
+        WHEN state = 'Oregon' THEN 'OR'
+        WHEN state = 'Pennsylvania' THEN 'PA'
+        WHEN state = 'Rhode Island' THEN 'RI'
+        WHEN state = 'South Carolina' THEN 'SC'
+        WHEN state = 'South Dakota' THEN 'SD'
+        WHEN state = 'Tennessee' THEN 'TN'
+        WHEN state = 'Texas' THEN 'TX'
+        WHEN state = 'Utah' THEN 'UT'
+        WHEN state = 'Vermont' THEN 'VT'
+        WHEN state = 'Virginia' THEN 'VA'
+        WHEN state = 'Washington' THEN 'WA'
+        WHEN state = 'West Virginia' THEN 'WV'
+        WHEN state = 'Wisconsin' THEN 'WI'
+        WHEN state = 'Wyoming' THEN 'WY'
+
+        -- Canada
+        WHEN state = 'Alberta' THEN 'AB'
+        WHEN state = 'British Columbia' THEN 'BC'
+        WHEN state = 'Manitoba' THEN 'MB'
+        WHEN state = 'New Brunswick' THEN 'NB'
+        WHEN state = 'Newfoundland and Labrador' THEN 'NL'
+        WHEN state = 'Northwest Territories' THEN 'NT'
+        WHEN state = 'Nova Scotia' THEN 'NS'
+        WHEN state = 'Nunavut' THEN 'NU'
+        WHEN state = 'Ontario' THEN 'ON'
+        WHEN state = 'Prince Edward Island' THEN 'PE'
+        WHEN state = 'Quebec' THEN 'QC'
+        WHEN state = 'Saskatchewan' THEN 'SK'
+        WHEN state = 'Yukon' THEN 'YT'
+
+        -- Mexico
+        WHEN state = 'Aguascalientes' THEN 'AGU'
+        WHEN state = 'Baja California' THEN 'BCN'
+        WHEN state = 'Baja California Sur' THEN 'BCS'
+        WHEN state = 'Campeche' THEN 'CAM'
+        WHEN state = 'Chiapas' THEN 'CHP'
+        WHEN state = 'Chihuahua' THEN 'CHH'
+        WHEN state = 'Coahuila' THEN 'COA'
+        WHEN state = 'Colima' THEN 'COL'
+        WHEN state = 'Durango' THEN 'DUR'
+        WHEN state = 'Guanajuato' THEN 'GUA'
+        WHEN state = 'Guerrero' THEN 'GRO'
+        WHEN state = 'Hidalgo' THEN 'HID'
+        WHEN state = 'Jalisco' THEN 'JAL'
+        WHEN state = 'Mexico State' THEN 'MEX'
+        WHEN state = 'Michoacán' THEN 'MIC'
+        WHEN state = 'Morelos' THEN 'MOR'
+        WHEN state = 'Nayarit' THEN 'NAY'
+        WHEN state = 'Nuevo León' THEN 'NLE'
+        WHEN state = 'Oaxaca' THEN 'OAX'
+        WHEN state = 'Puebla' THEN 'PUE'
+        WHEN state = 'Querétaro' THEN 'QUE'
+        WHEN state = 'Quintana Roo' THEN 'ROO'
+        WHEN state = 'San Luis Potosí' THEN 'SLP'
+        WHEN state = 'Sinaloa' THEN 'SIN'
+        WHEN state = 'Sonora' THEN 'SON'
+        WHEN state = 'Tabasco' THEN 'TAB'
+        WHEN state = 'Tamaulipas' THEN 'TAM'
+        WHEN state = 'Tlaxcala' THEN 'TLA'
+        WHEN state = 'Veracruz' THEN 'VER'
+        WHEN state = 'Yucatán' THEN 'YUC'
+        WHEN state = 'Zacatecas' THEN 'ZAC'
+    END AS state_code,
+    CASE 
+        WHEN country = 'United States' THEN 'USA'
+        WHEN country = 'Canada' THEN 'CAN'
+        WHEN country = 'Mexico' THEN 'MEX'
+    END AS country_code
+FROM usda_distribution;
 ```
