@@ -675,4 +675,24 @@ SELECT DISTINCT
         WHEN country = 'Mexico' THEN 'MEX'
     END AS country_code
 FROM usda_distribution;
+
+INSERT IGNORE INTO county (country_code, state_code, county_name)
+SELECT DISTINCT 
+    country.country_code,
+    state_region.state_code,
+    usda_distribution.County
+FROM usda_distribution
+JOIN state_region 
+    ON state_region.state_name = usda_distribution.state
+    AND state_region.country_code = 
+        CASE 
+            WHEN usda_distribution.country = 'United States' THEN 'USA'
+            WHEN usda_distribution.country = 'Canada' THEN 'CAN'
+            WHEN usda_distribution.country = 'Mexico' THEN 'MEX'
+        END
+JOIN country 
+    ON country.country_name = usda_distribution.country
+WHERE COALESCE(usda_distribution.County, '') <> '';
+
+
 ```
