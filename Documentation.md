@@ -321,8 +321,8 @@ def get_commons_thumbnail_cached(search_term, width=200):
         "format": "json",
         "prop": "pageimages",
         "generator": "search",
-        "gsrsearch": f'intitle:"{search_term}" insource:"{search_term}"',
-        "gsrlimit": 1,
+        "gsrsearch": f'intitle:"{search_term}"',
+        "gsrlimit": 5,  # get a few results to check titles explicitly
         "piprop": "thumbnail",
         "pithumbsize": width,
     }
@@ -330,15 +330,21 @@ def get_commons_thumbnail_cached(search_term, width=200):
         response = requests.get(search_url, params=params, timeout=10)
         data = response.json()
         pages = data.get("query", {}).get("pages", {})
+        
+        # Filter pages to those with exact term in title (case insensitive)
         for page in pages.values():
-            thumbnail = page.get("thumbnail", {}).get("source")
-            if thumbnail:
-                image_cache[search_term] = thumbnail
-                return thumbnail
+            title = page.get("title", "")
+            if search_term.lower() in title.lower():
+                thumbnail = page.get("thumbnail", {}).get("source")
+                if thumbnail:
+                    image_cache[search_term] = thumbnail
+                    return thumbnail
     except Exception as e:
         print(f"Error fetching image for {search_term}: {e}")
+
     image_cache[search_term] = ""
     return None
+
 
 def download_distribution_csv(symbol, scientific_name, common_name):
     """
@@ -447,7 +453,7 @@ def main():
     cursor = conn.cursor(dictionary=True)
 
     try:
-        cursor.execute("SELECT * FROM bonap_all_natives WHERE usda_code IS NOT NULL ORDER BY usda_code")
+        cursor.execute("SELECT * FROM bonap_all_natives WHERE usda_code IS NOT NULL  ORDER BY usda_code")
         plants = cursor.fetchall()
 
         for plant in plants:
