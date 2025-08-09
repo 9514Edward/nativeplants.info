@@ -694,5 +694,44 @@ JOIN country
     ON country.country_name = usda_distribution.country
 WHERE COALESCE(usda_distribution.County, '') <> '';
 
+INSERT IGNORE INTO state_plant (state_code, plant_id)
+SELECT DISTINCT
+    sr.state_code,
+    p.plant_id
+FROM usda_distribution ud
+JOIN state_region sr
+    ON sr.state_name = ud.state
+    AND sr.country_code = CASE
+        WHEN ud.country = 'United States' THEN 'USA'
+        WHEN ud.country = 'Canada' THEN 'CAN'
+        WHEN ud.country = 'Mexico' THEN 'MEX'
+    END
+JOIN plants p
+    ON p.usda_symbol = ud.symbol
+WHERE COALESCE(ud.state, '') <> ''
+  AND COALESCE(ud.symbol, '') <> '';
+
+
+INSERT IGNORE INTO county_plant (county_id, plant_id)
+SELECT DISTINCT
+    c.county_id,
+    p.plant_id
+FROM usda_distribution ud
+JOIN state_region sr
+    ON sr.state_name = ud.state
+    AND sr.country_code = CASE
+        WHEN ud.country = 'United States' THEN 'USA'
+        WHEN ud.country = 'Canada' THEN 'CAN'
+        WHEN ud.country = 'Mexico' THEN 'MEX'
+    END
+JOIN county c
+    ON c.county_name = ud.county
+    AND c.state_code = sr.state_code
+JOIN plants p
+    ON p.usda_symbol = ud.symbol
+WHERE COALESCE(ud.county, '') <> ''
+  AND COALESCE(ud.symbol, '') <> '';
+
+
 
 ```
