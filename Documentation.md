@@ -568,7 +568,7 @@ if __name__ == "__main__":
 
 **Populate state_region and other data fixes/initializations**
 
-
+```sql
 INSERT IGNORE INTO state_region (state_name, state_code, country_code)
 SELECT DISTINCT 
     state,
