@@ -738,6 +738,10 @@ JOIN plants p
 WHERE COALESCE(ud.county, '') <> ''
   AND COALESCE(ud.symbol, '') <> '';
 
+update plants 
+join usda_plantlist on  usda_plantlist.scientific_name = plants.scientific_name
+set plants.common_name = usda_plantlist.common_name where  coalesce(plants.common_name,'') = '';
 
+update plants set common_name = scientific_name where  coalesce(plants.common_name,'') = '';
 
 ```
