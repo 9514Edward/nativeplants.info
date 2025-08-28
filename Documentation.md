@@ -251,14 +251,20 @@ commit;
 
 
 INSERT INTO plants (usda_symbol, scientific_name, common_name)
-SELECT u.symbol, u.scientific_name, u.common_name
+SELECT 
+    u.usda_symbol,
+    u.scientific_name,
+    u.common_name
 FROM usda_plantlist u
 WHERE u.synonym_symbol IS NULL
-  AND NOT EXISTS (
-      SELECT 1
-      FROM plants p
-      WHERE p.usda_symbol = u.symbol
-  );
+ORDER BY 
+    u.scientific_name,
+    CASE 
+        WHEN u.common_name IS NOT NULL AND u.common_name <> '' THEN 0 
+        ELSE 1 
+    END,
+    u.usda_symbol;
+
 
 
 ```
