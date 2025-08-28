@@ -261,7 +261,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 DELETE FROM plant_images;
 DELETE FROM county_plant;
 DELETE FROM plants;
-
+delete from usda_distribution;
 -- ==============================
 -- 3. Optional: reset AUTO_INCREMENT
 -- ==============================
