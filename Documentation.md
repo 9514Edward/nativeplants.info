@@ -747,9 +747,9 @@ update plants set common_name = scientific_name where  coalesce(plants.common_na
 UPDATE plants
 SET usda_family = CONCAT(
       TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(usda_family, '| -', -1), '|', 1)), 
-      ' (*',
+      ' (',
       TRIM(SUBSTRING_INDEX(usda_family, ' ', 1)), 
-      '*)'
+      ')'
     )
 ;
 
