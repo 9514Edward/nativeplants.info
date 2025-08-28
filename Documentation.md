@@ -248,6 +248,19 @@ JOIN usda_plantlist usda
 SET bonap.usda_code = usda.symbol
 WHERE bonap.usda_code IS NULL;
 commit;
+
+
+INSERT INTO plants (usda_symbol, scientific_name, common_name)
+SELECT u.symbol, u.scientific_name, u.common_name
+FROM usda_plantlist u
+WHERE u.synonym_symbol IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM plants p
+      WHERE p.usda_symbol = u.symbol
+  );
+
+
 ```
 
 **Get a default image from mediapedia and scrape data from USDA**
