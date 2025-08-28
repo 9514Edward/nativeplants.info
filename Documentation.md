@@ -252,7 +252,7 @@ commit;
 
 INSERT INTO plants (usda_symbol, scientific_name, common_name)
 SELECT 
-    u.usda_symbol,
+    u.symbol,
     u.scientific_name,
     u.common_name
 FROM usda_plantlist u
@@ -263,7 +263,7 @@ ORDER BY
         WHEN u.common_name IS NOT NULL AND u.common_name <> '' THEN 0 
         ELSE 1 
     END,
-    u.usda_symbol;
+    u.symbol;
 
 
 
