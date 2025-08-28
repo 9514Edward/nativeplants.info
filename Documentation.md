@@ -250,20 +250,35 @@ WHERE bonap.usda_code IS NULL;
 commit;
 
 
-INSERT INTO plants (usda_symbol, scientific_name, common_name)
-SELECT 
-    u.symbol,
-    u.scientific_name,
-    u.common_name
-FROM usda_plantlist u
-WHERE u.synonym_symbol IS NULL
-ORDER BY 
-    u.scientific_name,
-    CASE 
-        WHEN u.common_name IS NOT NULL AND u.common_name <> '' THEN 0 
-        ELSE 1 
-    END,
-    u.symbol;
+-- ==============================
+-- 1. Disable foreign key checks
+-- ==============================
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- ==============================
+-- 2. Delete all existing records
+-- ==============================
+DELETE FROM plant_images;
+DELETE FROM county_plant;
+DELETE FROM plants;
+
+-- ==============================
+-- 3. Optional: reset AUTO_INCREMENT
+-- ==============================
+ALTER TABLE plants AUTO_INCREMENT = 1;
+ALTER TABLE plant_images AUTO_INCREMENT = 1;
+ALTER TABLE county_plant AUTO_INCREMENT = 1;
+
+-- ==============================
+-- 4. Re-enable foreign key checks
+-- ==============================
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- ==============================
+-- 5. Select USDA plants in correct order for scraping
+--    - main species first
+--    - then varieties with different common names
+-- ==============================
 
 
 
