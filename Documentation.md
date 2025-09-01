@@ -310,8 +310,8 @@ usda_cache_path = r"C:\Users\User\Documents\USANativePlantFinder\usda_cache.json
 
 MYSQL_CONFIG = {
     "host": "rizz2.cyax1patkaio.us-east-1.rds.amazonaws.com",
-    "user": "c6xvsSTa",
-    "password": "dhqDjL,vw7t!y%RY",
+    "user": "xxxxxxx",
+    "password": "xxxxxx",
     "database": "nativeplants",
 }
 
