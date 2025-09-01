@@ -724,6 +724,9 @@ if __name__ == "__main__":
 **Populate state_region and other data fixes/initializations**
 
 ```sql
+SET FOREIGN_KEY_CHECKS = 0;
+truncate table state_region;
+SET FOREIGN_KEY_CHECKS = 1;
 INSERT IGNORE INTO state_region (state_name, state_code, country_code)
 SELECT DISTINCT 
     state,
@@ -831,6 +834,10 @@ SELECT DISTINCT
     END AS country_code
 FROM usda_distribution;
 
+SET FOREIGN_KEY_CHECKS = 0;
+truncate table county;
+SET FOREIGN_KEY_CHECKS = 1;
+
 INSERT IGNORE INTO county (country_code, state_code, county_name)
 SELECT DISTINCT 
     country.country_code,
@@ -849,6 +856,10 @@ JOIN country
     ON country.country_name = usda_distribution.country
 WHERE COALESCE(usda_distribution.County, '') <> '';
 
+SET FOREIGN_KEY_CHECKS = 0;
+truncate table state_plant;
+SET FOREIGN_KEY_CHECKS = 1;
+
 INSERT IGNORE INTO state_plant (state_code, plant_id)
 SELECT DISTINCT
     sr.state_code,
@@ -866,6 +877,9 @@ JOIN plants p
 WHERE COALESCE(ud.state, '') <> ''
   AND COALESCE(ud.symbol, '') <> '';
 
+SET FOREIGN_KEY_CHECKS = 0;
+truncate table county_plant;
+SET FOREIGN_KEY_CHECKS = 1;
 
 INSERT IGNORE INTO county_plant (county_id, plant_id)
 SELECT DISTINCT
