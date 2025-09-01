@@ -284,7 +284,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 ```
 
-**Get a default image from mediapedia and scrape data from USDA**
+**Get a default images from mediapedia and USDA and scrape data from USDA**
 
 ```python
 import os
@@ -299,6 +299,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from urllib.parse import urljoin
+from bs4 import BeautifulSoup
 
 # ---- CONFIGURATION ----
 download_dir = r"C:\Users\User\Documents\USANativePlantFinder\distribution"
@@ -327,17 +329,23 @@ else:
     image_cache = {}
 
 # Selenium setup
-options = Options()
-options.add_argument("--headless")
+
+
+
+options = webdriver.ChromeOptions()
+options.add_argument("--headless=new")
 options.add_argument("--disable-gpu")
-prefs = {
-    "download.default_directory": download_dir,
-    "download.prompt_for_download": False,
-    "download.directory_upgrade": True,
-    "safebrowsing.enabled": True
-}
-options.add_experimental_option("prefs", prefs)
+options.add_argument("--no-sandbox")
+options.add_argument("--disable-background-networking")
+options.add_argument("--disable-software-rasterizer")
+options.add_argument("--disable-dev-shm-usage")
 driver = webdriver.Chrome(options=options)
+
+
+
+
+
+
 
 def insert_ignore(cursor, query, params):
     try:
@@ -345,45 +353,75 @@ def insert_ignore(cursor, query, params):
     except mysql.connector.Error as err:
         print(f"MySQL Error: {err}")
 
-def get_commons_thumbnail_cached(search_term, width=200):
-    if search_term in image_cache:
-        return image_cache[search_term]
-    print(f"Searching image for: {search_term}")
+
+def get_commons_image_data(scientific_name, max_images=3):
     search_url = "https://commons.wikimedia.org/w/api.php"
+    headers = {
+        "User-Agent": "USANativePlantFinder/1.0 (https://nativeplants.info; admin@nativeplants.info)"
+    }
+
+    # Step 1: search for files
     params = {
         "action": "query",
         "format": "json",
-        "prop": "pageimages",
-        "generator": "search",
-        "gsrsearch": f'intitle:"{search_term}"',
-        "gsrlimit": 5,  # get a few results to check titles explicitly
-        "piprop": "thumbnail",
-        "pithumbsize": width,
+        "list": "search",
+        "srsearch": scientific_name,
+        "srnamespace": 6,   # File: namespace only
+        "srlimit": 50       # grab more so we can filter better
     }
-    try:
-        response = requests.get(search_url, params=params, timeout=10)
-        data = response.json()
-        pages = data.get("query", {}).get("pages", {})
-        
-        # Filter pages to those with exact term in title (case insensitive)
-        for page in pages.values():
-            title = page.get("title", "")
-            if search_term.lower() in title.lower():
-                thumbnail = page.get("thumbnail", {}).get("source")
-                if thumbnail:
-                    image_cache[search_term] = thumbnail
-                    return thumbnail
-    except Exception as e:
-        print(f"Error fetching image for {search_term}: {e}")
+    resp = requests.get(search_url, params=params, headers=headers, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
 
-    image_cache[search_term] = ""
-    return None
+    results = data.get("query", {}).get("search", [])
+    if not results:
+        return []
+
+    sci_lower = scientific_name.lower()
+    chosen_titles = []
+
+    # Step 2: pick only exact scientific name matches in filenames
+    for result in results:
+        title = result.get("title", "")
+        if sci_lower in title.lower():
+            chosen_titles.append(title)
+        if len(chosen_titles) >= max_images:
+            break
+
+    # No padding — only use true matches
+    if not chosen_titles:
+        return []  # no relevant images
+
+    # Step 3: fetch imageinfo for selected files
+    params = {
+        "action": "query",
+        "format": "json",
+        "titles": "|".join(chosen_titles),
+        "prop": "imageinfo",
+        "iiprop": "url|extmetadata"
+    }
+    resp = requests.get(search_url, params=params, headers=headers, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+
+    pages = data.get("query", {}).get("pages", {})
+    images = []
+    for page in pages.values():
+        imageinfo = page.get("imageinfo", [])
+        if imageinfo:
+            image_url = imageinfo[0].get("url")
+            attribution = imageinfo[0].get("extmetadata", {}).get("Artist", {}).get("value", "")
+            images.append((image_url, attribution))
+
+    return images
 
 
-def download_distribution_csv(symbol, scientific_name, common_name):
+
+
+def download_distribution_csv(symbol, scientific_name, common_name, driver):
     """
     Scrapes USDA metadata tables and distribution CSV from the plant profile page.
-    Returns metadata dict on success or None on failure.
+    Returns a metadata dict on success or None on failure.
     """
     url = f"https://plants.sc.egov.usda.gov/plant-profile/{symbol}"
     driver.get(url)
@@ -396,90 +434,143 @@ def download_distribution_csv(symbol, scientific_name, common_name):
 
         metadata = {}
 
-        # Scrape main metadata table
-        table = driver.find_element(By.CSS_SELECTOR, "table.usa-table.margin-top-0")
-        rows = table.find_elements(By.TAG_NAME, "tr")
-        for row in rows:
-            th = row.find_element(By.TAG_NAME, "th")
-            td = row.find_element(By.TAG_NAME, "td")
-            key = th.find_element(By.TAG_NAME, "h3").text.strip().lower().replace(" ", "_")
-            spans = td.find_elements(By.TAG_NAME, "span")
-            if spans:
-                value = " | ".join(span.text.strip() for span in spans if span.text.strip())
-            else:
-                value = td.text.strip()
-            metadata[key] = value
+        # === Main metadata table ===
+        try:
+            table = driver.find_element(By.CSS_SELECTOR, "table.usa-table.margin-top-0")
+            rows = table.find_elements(By.TAG_NAME, "tr")
+            for row in rows:
+                try:
+                    th = row.find_element(By.TAG_NAME, "th")
+                    td = row.find_element(By.TAG_NAME, "td")
+                    key = th.find_element(By.TAG_NAME, "h3").text.strip().lower().replace(" ", "_")
+                    spans = td.find_elements(By.TAG_NAME, "span")
+                    if spans:
+                        value = " | ".join(span.text.strip() for span in spans if span.text.strip())
+                    else:
+                        value = td.text.strip()
+                    metadata[key] = value
+                except Exception:
+                    continue
+        except Exception:
+            print(f"⚠️ Main metadata table not found for {symbol}")
 
-        # Scrape classification table
-        classification_table = driver.find_element(By.CSS_SELECTOR, "table.classification-table")
-        rows = classification_table.find_elements(By.TAG_NAME, "tr")
-        for row in rows:
-            th = row.find_element(By.TAG_NAME, "th")
-            td = row.find_element(By.TAG_NAME, "td")
-            key = th.find_element(By.TAG_NAME, "h3").text.strip().lower().replace(" ", "_")
-            spans = td.find_elements(By.TAG_NAME, "span")
-            texts = [span.text.strip() for span in spans if span.text.strip()]
-            metadata[key] = " | ".join(texts)
+        # === Classification table ===
+        try:
+            classification_table = driver.find_element(By.CSS_SELECTOR, "table.classification-table")
+            rows = classification_table.find_elements(By.TAG_NAME, "tr")
+            for row in rows:
+                try:
+                    th = row.find_element(By.TAG_NAME, "th")
+                    td = row.find_element(By.TAG_NAME, "td")
+                    key = th.find_element(By.TAG_NAME, "h3").text.strip().lower().replace(" ", "_")
+                    spans = td.find_elements(By.TAG_NAME, "span")
+                    texts = [span.text.strip() for span in spans if span.text.strip()]
+                    metadata[key] = " | ".join(texts)
+                except Exception:
+                    continue
+        except Exception:
+            print(f"⚠️ Classification table not found for {symbol}")
 
-        # Add scientific_name and common_name from params (not scraped)
-        metadata["scientific_name"] = scientific_name
-        metadata["common_name"] = common_name
-
-        print(f"Scraped metadata for {symbol}: {metadata}")
-
-        # Download distribution CSV
-        first_button = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.LINK_TEXT, "Download Distribution Data"))
-        )
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_button)
-        time.sleep(0.5)
-        driver.execute_script("arguments[0].click();", first_button)
-        print(f"📥 Opened download panel for {symbol}")
-
-        second_link = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, "//a[@download='DistributionData.csv']"))
-        )
-        blob_url = second_link.get_attribute("href")
-
-        csv_data = driver.execute_async_script("""
-            const url = arguments[0];
-            const callback = arguments[1];
-            fetch(url)
-                .then(r => r.blob())
-                .then(blob => blob.text())
-                .then(text => callback(text))
-                .catch(err => callback(null));
-        """, blob_url)
-
-        if not csv_data:
-            raise Exception("Failed to retrieve CSV from blob URL.")
-
-        csv_text = csv_data.lstrip("\ufeff")
-        lines = csv_text.splitlines()
-        if lines and lines[0].strip().lower().startswith("distribution data"):
-            lines = lines[1:]
-
-        csv_reader = csv.DictReader(lines)
-        dist_rows = [
-            (
-                row.get("Symbol", ""),
-                row.get("Country", ""),
-                row.get("State", ""),
-                row.get("State FIP", ""),
-                row.get("County", ""),
-                row.get("County FIP", "")
+        # USDA common name from the header
+        try:
+            common_name_elem = driver.find_element(
+                By.CSS_SELECTOR, "plant-profile-header h2"
             )
-            for row in csv_reader
-        ]
+            usda_common_name = common_name_elem.text.strip()
+        except Exception:
+            usda_common_name = None
 
-        # Add distribution rows to metadata so caller can insert them later
-        metadata["distribution_rows"] = dist_rows
+        # Add scientific_name and common_name from parameters,
+        # fallback to USDA common name if parameter is None or empty
+        metadata["scientific_name"] = scientific_name
+        metadata["common_name"] = common_name if common_name else usda_common_name
+        metadata["usda_common_name"] = usda_common_name
+		
+		
+        # === USDA first non-copyrighted image via Selenium ===
+        usda_image_url = None
+        try:
+            img_tags = driver.find_elements(By.CSS_SELECTOR, ".text-center.profile-image-wrapper img")
+            if img_tags:
+                usda_image_url = img_tags[0].get_attribute("src")
+        except Exception:
+            usda_image_url = None
+
+        metadata["usda_image_url"] = usda_image_url
+            
+
+        # === Download distribution CSV ===
+        metadata["distribution_rows"] = []
+        try:
+            # Click "Download Distribution Data" button
+            download_btn = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.LINK_TEXT, "Download Distribution Data"))
+            )
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", download_btn)
+            time.sleep(0.5)
+            download_btn.click()
+
+            # Wait for the CSV link and fetch CSV data from blob
+            csv_link = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "//a[@download='DistributionData.csv']"))
+            )
+            csv_url = csv_link.get_attribute("href")
+
+            csv_text = driver.execute_async_script("""
+                const url = arguments[0];
+                const callback = arguments[1];
+                fetch(url)
+                    .then(r => r.blob())
+                    .then(blob => blob.text())
+                    .then(text => callback(text))
+                    .catch(err => callback(null));
+            """, csv_url)
+
+            if csv_text:
+                csv_text = csv_text.lstrip("\ufeff")
+                lines = csv_text.splitlines()
+                if lines and lines[0].strip().lower().startswith("distribution data"):
+                    lines = lines[1:]
+
+                csv_reader = csv.DictReader(lines)
+                dist_rows = [
+                    (
+                        row.get("Symbol", ""),
+                        row.get("Country", ""),
+                        row.get("State", ""),
+                        row.get("State FIP", ""),
+                        row.get("County", ""),
+                        row.get("County FIP", "")
+                    )
+                    for row in csv_reader
+                ]
+                metadata["distribution_rows"] = dist_rows
+            else:
+                print(f"⚠️ Failed to retrieve CSV for {symbol}")
+        except Exception as e:
+            print(f"⚠️ Distribution CSV failed for {symbol}: {e}")
 
         return metadata
 
     except Exception as e:
-        print(f"⚠️ Failed to load data for {symbol}: {e}")
+        print(f"⚠️ Failed to load page for {symbol}: {e}")
         return None
+
+
+
+def get_base_species(scientific_name):
+    """Return the base species portion of a USDA scientific name."""
+    parts = scientific_name.split()
+    if "var." in parts:
+        idx = parts.index("var.")
+        return " ".join(parts[:idx])
+    elif "subsp." in parts:
+        idx = parts.index("subsp.")
+        return " ".join(parts[:idx])
+    else:
+        # No variety/subspecies, main species
+        return " ".join(parts[:2])
+
 
 def main():
     # DB connection
@@ -487,18 +578,26 @@ def main():
     cursor = conn.cursor(dictionary=True)
 
     try:
-        cursor.execute("SELECT * FROM bonap_all_natives WHERE usda_code IS NOT NULL  ORDER BY usda_code")
+        cursor.execute("SELECT * FROM usda_plantlist WHERE synonym_symbol IS NULL  and scientific_name > 'Trifolium bejariens'  AND scientific_name_with_author NOT REGEXP ' var\\.| subsp\\.| ssp\\.| f\\.| forma' ORDER BY scientific_name;")
         plants = cursor.fetchall()
 
         for plant in plants:
-            symbol = plant.get("usda_code")
+            symbol = plant.get("symbol")
             scientific_name = plant.get("scientific_name")
             common_name = plant.get("common_name")
 
-            # Get cached or fetch Wikimedia image
-            image_url = plant.get("image", "").strip()
-            if not image_url:
-                image_url = get_commons_thumbnail_cached(scientific_name)
+            base_species = get_base_species(scientific_name)
+
+            # Skip insertion if not the base species and common name matches base
+            if scientific_name != base_species:
+                cursor.execute(
+                    "SELECT common_name FROM usda_plantlist WHERE scientific_name = %s",
+                    (base_species,)
+                )
+                row = cursor.fetchone()
+                base_common_name = row["common_name"] if row else None
+                if common_name == base_common_name:
+                    continue  # Skip this variety because common name is same as base
 
             # Insert basic plant info
             insert_ignore(cursor,
@@ -509,32 +608,53 @@ def main():
                 (symbol, scientific_name, common_name)
             )
 
-            # Get plant_id from usda_plantlist for linking
-            cursor.execute("SELECT DISTINCT symbol FROM usda_plantlist WHERE symbol = %s", (symbol,))
+            # Get plant_id for linking
+            cursor.execute("SELECT plant_id FROM plants WHERE usda_symbol = %s", (symbol,))
             row = cursor.fetchone()
-            plant_id = row["symbol"] if row else None
+            plant_id = row["plant_id"] if row else None
 
-            if plant_id and image_url:
-                insert_ignore(cursor,
-                    """
-                    INSERT IGNORE INTO plant_images (plant_id, image_url, source)
-                    VALUES (%s, %s, %s)
-                    """,
-                    (plant_id, image_url, "wikimedia")
-                )
+            # Wikimedia images (up to 3)
+            wikimedia_images = get_commons_image_data(scientific_name)
 
-            # Scrape USDA metadata + distribution CSV
-            metadata = download_distribution_csv(symbol, scientific_name, common_name)
+            # Build images list with explicit source
+            images_to_insert = []
+
+            # Add Wikimedia images
+            for url, attr in wikimedia_images:
+                if url:  # skip any empty URLs
+                    images_to_insert.append((url, "wikimedia", attr))
+
+            # Add USDA image if available
+            metadata = download_distribution_csv(symbol, scientific_name, common_name, driver)
+            usda_url = metadata.get("usda_image_url") if metadata else None
+
+            if usda_url:
+                # Avoid inserting the same URL twice
+                if all(usda_url != url for url, _, _ in images_to_insert):
+                    images_to_insert.append((usda_url, "usda", "USDA"))
+
+            # Insert into DB
+            for image_url, source, attribution in images_to_insert:
+                if plant_id and image_url:
+                    insert_ignore(cursor,
+                        """
+                        INSERT IGNORE INTO plant_images (plant_id, image_url, source, attribution)
+                        VALUES (%s, %s, %s, %s)
+                        """,
+                        (plant_id, image_url, source, attribution)
+                    )
+
             if metadata:
-                # Insert/update plants table with USDA metadata
+                # Insert/update plant metadata
                 try:
                     cursor.execute("""
                         INSERT INTO plants (
                             usda_symbol, scientific_name, common_name,
                             usda_group, usda_duration, usda_growth_habit, usda_native_status,
                             usda_kingdom, usda_subkingdom, usda_superdivision, usda_division,
-                            usda_class, usda_subclass, usda_order, usda_family, usda_genus, usda_species
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            usda_class, usda_subclass, usda_order, usda_family, usda_genus,
+                            usda_species, usda_common_name
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             scientific_name=VALUES(scientific_name),
                             common_name=VALUES(common_name),
@@ -551,14 +671,15 @@ def main():
                             usda_order=VALUES(usda_order),
                             usda_family=VALUES(usda_family),
                             usda_genus=VALUES(usda_genus),
-                            usda_species=VALUES(usda_species)
+                            usda_species=VALUES(usda_species),
+                            usda_common_name=VALUES(usda_common_name)
                     """, (
                         symbol,
                         metadata.get("scientific_name"),
                         metadata.get("common_name"),
                         metadata.get("group"),
                         metadata.get("duration"),
-                        metadata.get("growth_habits") or metadata.get("growth_habit"),  # fix key name
+                        metadata.get("growth_habits") or metadata.get("growth_habit"),
                         metadata.get("native_status"),
                         metadata.get("kingdom"),
                         metadata.get("subkingdom"),
@@ -569,14 +690,15 @@ def main():
                         metadata.get("order"),
                         metadata.get("family"),
                         metadata.get("genus"),
-                        metadata.get("species")
+                        metadata.get("species"),
+                        metadata.get("usda_common_name")
                     ))
+                    print(f"✅ Plant {scientific_name} inserted with images and USDA data.")
                 except mysql.connector.Error as err:
                     print(f"❌ DB error for {symbol}: {err}")
 
-                # Remove old distribution data
+                # Update distribution data
                 cursor.execute("DELETE FROM usda_distribution WHERE `Symbol` = %s", (symbol,))
-                # Insert new distribution data rows
                 dist_rows = metadata.get("distribution_rows", [])
                 if dist_rows:
                     cursor.executemany("""
@@ -592,13 +714,6 @@ def main():
         conn.close()
         driver.quit()
 
-    # Save caches
-    with open(image_cache_path, 'w', encoding='utf-8') as f:
-        json.dump(image_cache, f, indent=2, ensure_ascii=False)
-    with open(usda_cache_path, 'w', encoding='utf-8') as f:
-        json.dump(usda_cache, f, indent=2, ensure_ascii=False)
-
-    print("✅ Plants inserted with image and USDA data.")
 
 if __name__ == "__main__":
     main()
