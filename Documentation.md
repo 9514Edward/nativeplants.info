@@ -917,3 +917,301 @@ SET usda_family = CONCAT(
 ;
 
 ```
+**Re-size Images**
+```python
+import pymysql
+import requests
+import csv
+import io
+from io import BytesIO
+from PIL import Image
+import fitz        # PyMuPDF for PDFs
+import cairosvg    # for SVG conversion
+import boto3
+
+# ===== CONFIGURATION =====
+MYSQL_CONFIG = {
+    "host": "rizz2.cyax1patkaio.us-east-1.rds.amazonaws.com",
+    "user": "xxxxx",
+    "password": "xxxxxxx",
+    "database": "nativeplants",
+}
+
+s3_client = boto3.client(
+    "s3",
+    aws_access_key_id="xxxxxx",
+    aws_secret_access_key="xxxxxxxx",
+    region_name="us-east-1"
+)
+
+S3_BUCKET = "nativeplants.info"
+S3_PREFIX = "medium_images/"
+CLOUDFRONT_DOMAIN = "nativeplants.info"  # replace with your CloudFront domain
+FAILURE_LOG = "image_failures.csv"
+
+
+
+# ===== HELPER FUNCTIONS =====
+
+def upload_to_s3(file_bytes, key):
+    s3_client.upload_fileobj(
+        file_bytes,
+        S3_BUCKET,
+        key,
+        ExtraArgs={"ContentType": "image/jpeg"}  # keep ACL private, CloudFront serves publicly
+    )
+    return f"https://{CLOUDFRONT_DOMAIN}/{key}"
+
+def pdf_to_image(pdf_bytes):
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    page = doc[0]
+    pix = page.get_pixmap()
+    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    doc.close()
+    return img
+
+def svg_to_png(svg_bytes):
+    png_bytes = cairosvg.svg2png(bytestring=svg_bytes)
+    return Image.open(BytesIO(png_bytes))
+
+def resize_image(img_input, width=200):
+    """
+    img_input can be:
+      - PIL.Image object
+      - bytes (for normal images)
+    Returns BytesIO of JPEG image.
+    """
+    if isinstance(img_input, bytes):
+        img = Image.open(BytesIO(img_input))
+    else:
+        img = img_input
+
+    # Resize proportionally
+    w_percent = width / float(img.size[0])
+    h_size = int(float(img.size[1]) * w_percent)
+    img_resized = img.resize((width, h_size), Image.LANCZOS)
+
+    # Convert to RGB to handle PNG/GIF transparency
+    if img_resized.mode in ("RGBA", "LA"):
+        background = Image.new("RGB", img_resized.size, (255, 255, 255))
+        background.paste(img_resized, mask=img_resized.split()[-1])
+        img_resized = background
+    elif img_resized.mode != "RGB":
+        img_resized = img_resized.convert("RGB")
+
+    out = BytesIO()
+    img_resized.save(out, format="JPEG", quality=85)
+    out.seek(0)
+    return out
+
+# ===== MAIN SCRIPT =====
+
+def main():
+    conn = pymysql.connect(**MYSQL_CONFIG)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT pi.image_id, pi.image_url, p.scientific_name
+        FROM plant_images pi
+        JOIN plants p ON pi.plant_id = p.plant_id
+        WHERE pi.internal_image_url IS NULL
+        ORDER BY p.scientific_name
+    """)
+
+    rows = cursor.fetchall()
+    total = len(rows)
+    print(f"Found {total} images to process.")
+
+    # Prepare failure log
+    failure_file = open(FAILURE_LOG, mode="w", newline="", encoding="utf-8")
+    failure_writer = csv.writer(failure_file)
+    failure_writer.writerow(["image_id", "scientific_name", "image_url", "error"])
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/139.0.0.0 Safari/537.36"
+    }
+
+    for i, (image_id, image_url, scientific_name) in enumerate(rows, start=1):
+        try:
+            print(f"[{i}/{total}] Processing {scientific_name} (image_id {image_id}) from {image_url}...")
+            resp = requests.get(image_url, headers=headers, timeout=30)
+            resp.raise_for_status()
+
+            content_type = resp.headers.get("Content-Type", "").lower()
+
+            if content_type.startswith("image/"):
+                if content_type == "image/svg+xml":
+                    img = svg_to_png(resp.content)
+                    resized = resize_image(img)
+                else:
+                    resized = resize_image(resp.content)
+            elif content_type == "application/pdf":
+                img = pdf_to_image(resp.content)
+                resized = resize_image(img)
+            else:
+                raise ValueError(f"Unsupported file type: {content_type}")
+
+            safe_name = scientific_name.replace(" ", "_")
+            key = f"{S3_PREFIX}{safe_name}_{image_id}.jpg"
+
+            s3_url = upload_to_s3(resized, key)
+
+            # Update DB
+            cursor.execute(
+                "UPDATE plant_images SET internal_image_url=%s WHERE image_id=%s",
+                (s3_url, image_id)
+            )
+            conn.commit()
+            print(f"✅ Uploaded {scientific_name} (id {image_id}) → {s3_url}")
+
+        except Exception as e:
+            error_msg = str(e).replace("\n", " ")
+            print(f"❌ Failed {scientific_name} (id {image_id}): {error_msg}")
+            failure_writer.writerow([image_id, scientific_name, image_url, error_msg])
+
+    cursor.close()
+    conn.close()
+    failure_file.close()
+    print("All done! Failures (if any) logged to:", FAILURE_LOG)
+
+if __name__ == "__main__":
+    main()
+
+
+
+# --- Config ---
+MYSQL_CONFIG = {
+    "host": "rizz2.cyax1patkaio.us-east-1.rds.amazonaws.com",
+    "user": "c6xvsSTa",
+    "password": "dhqDjL,vw7t!y%RY",
+    "database": "nativeplants",
+}
+
+S3_BUCKET = "nativeplants.info"
+S3_PREFIX = "medium_images/"
+IMAGE_WIDTH = 200
+FAILURE_LOG = "image_failures.csv"
+
+# --- Connectors ---
+s3_client = boto3.client("s3")
+
+def pdf_to_image(pdf_bytes):
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    page = doc[0]  # first page
+    pix = page.get_pixmap()  # renders page
+    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    doc.close()
+    return img
+
+def resize_image(img_bytes, width=200, content_type="image/jpeg"):
+    if content_type == "application/pdf":
+        doc = fitz.open(stream=img_bytes, filetype="pdf")
+        page = doc[0]
+        pix = page.get_pixmap()
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        doc.close()
+    else:
+        img = Image.open(BytesIO(img_bytes))
+
+    w_percent = width / float(img.size[0])
+    h_size = int(float(img.size[1]) * w_percent)
+    img_resized = img.resize((width, h_size), Image.LANCZOS)
+
+    if img_resized.mode != "RGB":
+        img_resized = img_resized.convert("RGB")
+
+    out = BytesIO()
+    img_resized.save(out, format="JPEG", quality=85)
+    out.seek(0)
+    return out
+
+CLOUDFRONT_DOMAIN = "nativeplants.info"  # replace with your actual CloudFront domain
+
+def upload_to_s3(file_bytes, key):
+    # Upload to S3 (private)
+    s3_client.upload_fileobj(
+        file_bytes,
+        S3_BUCKET,
+        key,
+        ExtraArgs={"ContentType": "image/jpeg"}  # keep ACL private
+    )
+    # Return CloudFront URL instead of S3 URL
+    return f"https://{CLOUDFRONT_DOMAIN}/{key}"
+
+def main():
+    conn = pymysql.connect(**MYSQL_CONFIG)
+    cursor = conn.cursor()
+
+    # join with plants to get scientific name, order alphabetically
+    cursor.execute("""
+        SELECT pi.image_id, pi.image_url, p.scientific_name
+        FROM plant_images pi
+        JOIN plants p ON pi.plant_id = p.plant_id
+        WHERE pi.internal_image_url IS NULL
+        ORDER BY p.scientific_name
+    """)
+
+    rows = cursor.fetchall()
+    total = len(rows)
+
+    print(f"Found {total} images to process.")
+
+    # prepare failure log
+    failure_file = open(FAILURE_LOG, mode="w", newline="", encoding="utf-8")
+    failure_writer = csv.writer(failure_file)
+    failure_writer.writerow(["image_id", "scientific_name", "image_url", "error"])
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/139.0.0.0 Safari/537.36"
+    }
+
+    for i, (image_id, image_url, scientific_name) in enumerate(rows, start=1):
+        try:
+            print(f"[{i}/{total}] Processing {scientific_name} (image_id {image_id}) from {image_url}...")
+            
+            resp = requests.get(image_url, headers=headers, timeout=20)
+            resp.raise_for_status()
+
+            # check Content-Type
+            content_type = resp.headers.get("Content-Type", "").lower()
+            if content_type.startswith("image/") or content_type == "application/pdf":
+                resized = resize_image(resp.content, content_type=content_type)
+            else:
+                raise ValueError(f"Unsupported file type: {content_type}")
+
+            # resize and handle PNG/GIF/transparent images
+            resized = resize_image(resp.content)
+            safe_name = scientific_name.replace(" ", "_")
+            key = f"{S3_PREFIX}{safe_name}_{image_id}.jpg"
+
+            # upload to S3, return CloudFront URL
+            s3_url = upload_to_s3(resized, key)
+
+            # update DB
+            cursor.execute(
+                "UPDATE plant_images SET internal_image_url=%s WHERE image_id=%s",
+                (s3_url, image_id)
+            )
+            conn.commit()
+
+            print(f"✅ Uploaded {scientific_name} (id {image_id}) → {s3_url}")
+
+        except Exception as e:
+            error_msg = str(e).replace("\n", " ")
+            print(f"❌ Failed {scientific_name} (id {image_id}): {error_msg}")
+            failure_writer.writerow([image_id, scientific_name, image_url, error_msg])
+
+    cursor.close()
+    conn.close()
+    failure_file.close()
+
+    print("All done! Failures (if any) logged to:", FAILURE_LOG)
+
+
+if __name__ == "__main__":
+    main()
+```
