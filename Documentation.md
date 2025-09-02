@@ -859,6 +859,77 @@ WHERE COALESCE(usda_distribution.County, '') <> '';
 SET FOREIGN_KEY_CHECKS = 0;
 truncate table state_plant;
 SET FOREIGN_KEY_CHECKS = 1;
+```
+
+*** Create table to store plant native states
+```sql
+CREATE TABLE plant_native_status (
+    plant_id INT NOT NULL,
+    region_code VARCHAR(10) NOT NULL,   -- e.g., 'L48', 'AK', 'HI', 'CAN-ON', 'MEX-CHH', etc.
+    is_native BOOLEAN NOT NULL DEFAULT 0,
+    is_introduced BOOLEAN NOT NULL DEFAULT 0,
+    PRIMARY KEY (plant_id, region_code),
+    FOREIGN KEY (plant_id) REFERENCES plants(plant_id)
+);
+```
+
+***Normalize usda_native_status across all countries
+```sql
+
+-- Truncate first
+TRUNCATE TABLE plant_native_status;
+
+DELIMITER $$
+
+CREATE OR REPLACE PROCEDURE normalize_native_status_all_countries()
+BEGIN
+    -- Start fresh
+    TRUNCATE TABLE plant_native_status;
+
+    -- Step 1: Parse usda_native_status into plant_native_status
+    INSERT INTO plant_native_status (plant_id, region_code, status_code)
+    SELECT 
+        p.plant_id,
+        TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(s.status_part, ' ', 1), ' ', -1)) AS region_code,
+        TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(s.status_part, ' ', -1), ' ', 1)) AS status_code
+    FROM plants p
+    CROSS JOIN JSON_TABLE(
+        REPLACE(REPLACE(p.usda_native_status, '|', ','), '  ', ' '),
+        "$[*]" COLUMNS(status_part VARCHAR(255) PATH "$")
+    ) AS s
+    WHERE p.usda_native_status IS NOT NULL
+      AND TRIM(s.status_part) <> '';
+
+    -- Step 2: Expand L48 into the 48 contiguous states
+    INSERT INTO plant_native_status (plant_id, region_code, status_code)
+    SELECT 
+        pns.plant_id,
+        sr.state_code,
+        pns.status_code
+    FROM plant_native_status pns
+    JOIN state_region sr 
+      ON sr.country_code = 'USA'
+    WHERE pns.region_code = 'L48'
+      AND sr.state_code NOT IN ('AK','HI');
+
+    -- Step 3: (optional) Remove the placeholder L48 rows if you don't want them
+    DELETE FROM plant_native_status WHERE region_code = 'L48';
+END$$
+
+DELIMITER ;
+
+```
+
+***Then run the procedure
+```sql
+      CALL normalize_native_status_all_countries();
+```
+
+***Poplulate State Plant for USA, CAN, MEX
+```sql
+SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE state_plant;
+SET FOREIGN_KEY_CHECKS = 1;
 
 INSERT IGNORE INTO state_plant (state_code, plant_id)
 SELECT DISTINCT
@@ -874,32 +945,21 @@ JOIN state_region sr
     END
 JOIN plants p
     ON p.usda_symbol = ud.symbol
+JOIN plant_native_status ns
+    ON ns.plant_id = p.plant_id
+    AND ns.region_code = 
+        CASE
+            WHEN sr.country_code='USA' THEN sr.state_code
+            WHEN sr.country_code='CAN' THEN CONCAT('CAN-', sr.province_code)
+            WHEN sr.country_code='MEX' THEN CONCAT('MEX-', sr.state_code)
+        END
+    AND ns.is_native = 1  -- only native
 WHERE COALESCE(ud.state, '') <> ''
   AND COALESCE(ud.symbol, '') <> '';
 
-SET FOREIGN_KEY_CHECKS = 0;
-truncate table county_plant;
-SET FOREIGN_KEY_CHECKS = 1;
+```
 
-INSERT IGNORE INTO county_plant (county_id, plant_id)
-SELECT DISTINCT
-    c.county_id,
-    p.plant_id
-FROM usda_distribution ud
-JOIN state_region sr
-    ON sr.state_name = ud.state
-    AND sr.country_code = CASE
-        WHEN ud.country = 'United States' THEN 'USA'
-        WHEN ud.country = 'Canada' THEN 'CAN'
-        WHEN ud.country = 'Mexico' THEN 'MEX'
-    END
-JOIN county c
-    ON c.county_name = ud.county
-    AND c.state_code = sr.state_code
-JOIN plants p
-    ON p.usda_symbol = ud.symbol
-WHERE COALESCE(ud.county, '') <> ''
-  AND COALESCE(ud.symbol, '') <> '';
+
 
 update plants 
 join usda_plantlist on  usda_plantlist.scientific_name = plants.scientific_name
