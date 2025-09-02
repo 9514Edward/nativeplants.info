@@ -310,8 +310,8 @@ usda_cache_path = r"C:\Users\User\Documents\USANativePlantFinder\usda_cache.json
 
 MYSQL_CONFIG = {
     "host": "rizz2.cyax1patkaio.us-east-1.rds.amazonaws.com",
-    "user": "xxxxxxx",
-    "password": "xxxxxx",
+    "user": "xxxxx",
+    "password": "xxxxx",
     "database": "nativeplants",
 }
 
@@ -578,13 +578,28 @@ def main():
     cursor = conn.cursor(dictionary=True)
 
     try:
-        cursor.execute("SELECT * FROM usda_plantlist WHERE synonym_symbol IS NULL  and scientific_name > 'Trifolium bejariens'  AND scientific_name_with_author NOT REGEXP ' var\\.| subsp\\.| ssp\\.| f\\.| forma' ORDER BY scientific_name;")
+        cursor.execute("""
+            SELECT * 
+            FROM usda_plantlist 
+            WHERE synonym_symbol IS NULL  
+              AND scientific_name_with_author NOT REGEXP ' var\\.| subsp\\.| ssp\\.| f\\.| forma'
+            ORDER BY scientific_name;
+        """)
         plants = cursor.fetchall()
 
         for plant in plants:
             symbol = plant.get("symbol")
             scientific_name = plant.get("scientific_name")
             common_name = plant.get("common_name")
+
+            # ✅ Skip genus-level entries (no species part, or N/A / sp. / spp.)
+            species_part = None
+            if scientific_name and " " in scientific_name.strip():
+                species_part = scientific_name.strip().split(" ", 1)[1]
+
+            if not species_part or species_part.lower() in ("n/a", "sp.", "spp."):
+                print(f"⏩ Skipping genus-level entry: {scientific_name}")
+                continue
 
             base_species = get_base_species(scientific_name)
 
@@ -713,6 +728,7 @@ def main():
         cursor.close()
         conn.close()
         driver.quit()
+
 
 
 if __name__ == "__main__":
@@ -875,48 +891,83 @@ CREATE TABLE plant_native_status (
 
 ***Normalize usda_native_status across all countries
 ```sql
-
--- Truncate first
-TRUNCATE TABLE plant_native_status;
+DROP PROCEDURE IF EXISTS normalize_native_status_all_countries;
 
 DELIMITER $$
 
-CREATE OR REPLACE PROCEDURE normalize_native_status_all_countries()
+CREATE PROCEDURE normalize_native_status_all_countries()
 BEGIN
-    -- Start fresh
+    DECLARE done INT DEFAULT 0;
+    DECLARE p_id INT;
+    DECLARE raw_status TEXT;
+    DECLARE region_status TEXT;
+    DECLARE region_code VARCHAR(10);
+    DECLARE status_code VARCHAR(10);
+
+    DECLARE cur CURSOR FOR 
+        SELECT plant_id, usda_native_status 
+        FROM plants 
+        WHERE usda_native_status IS NOT NULL;
+
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
+
+    -- Clear the table first
     TRUNCATE TABLE plant_native_status;
 
-    -- Step 1: Parse usda_native_status into plant_native_status
-    INSERT INTO plant_native_status (plant_id, region_code, status_code)
-    SELECT 
-        p.plant_id,
-        TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(s.status_part, ' ', 1), ' ', -1)) AS region_code,
-        TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(s.status_part, ' ', -1), ' ', 1)) AS status_code
-    FROM plants p
-    CROSS JOIN JSON_TABLE(
-        REPLACE(REPLACE(p.usda_native_status, '|', ','), '  ', ' '),
-        "$[*]" COLUMNS(status_part VARCHAR(255) PATH "$")
-    ) AS s
-    WHERE p.usda_native_status IS NOT NULL
-      AND TRIM(s.status_part) <> '';
+    OPEN cur;
 
-    -- Step 2: Expand L48 into the 48 contiguous states
-    INSERT INTO plant_native_status (plant_id, region_code, status_code)
-    SELECT 
-        pns.plant_id,
-        sr.state_code,
-        pns.status_code
-    FROM plant_native_status pns
-    JOIN state_region sr 
-      ON sr.country_code = 'USA'
-    WHERE pns.region_code = 'L48'
-      AND sr.state_code NOT IN ('AK','HI');
+    read_loop: LOOP
+        FETCH cur INTO p_id, raw_status;
+        IF done THEN
+            LEAVE read_loop;
+        END IF;
 
-    -- Step 3: (optional) Remove the placeholder L48 rows if you don't want them
-    DELETE FROM plant_native_status WHERE region_code = 'L48';
+        -- Remove leading/trailing spaces
+        SET raw_status = TRIM(raw_status);
+
+        -- Split by ' | | ' to get each region-status pair
+        WHILE LENGTH(raw_status) > 0 DO
+            -- Find next separator
+            SET @sep_pos = INSTR(raw_status, ' | | ');
+            IF @sep_pos > 0 THEN
+                SET region_status = LEFT(raw_status, @sep_pos - 1);
+                SET raw_status = SUBSTRING(raw_status, @sep_pos + 5);
+            ELSE
+                SET region_status = raw_status;
+                SET raw_status = '';
+            END IF;
+
+            -- Clean extra spaces
+            SET region_status = TRIM(region_status);
+
+            -- Split region and status
+            SET @space_pos = INSTR(region_status, ' ');
+            IF @space_pos > 0 THEN
+                SET region_code = TRIM(LEFT(region_status, @space_pos - 1));
+                SET status_code = TRIM(SUBSTRING(region_status, @space_pos + 1));
+            ELSE
+                SET region_code = region_status;
+                SET status_code = NULL;
+            END IF;
+
+            -- Determine flags
+            SET @is_native = IF(status_code IS NOT NULL AND LOCATE('N', status_code) > 0, 1, 0);
+            SET @is_introduced = IF(status_code IS NOT NULL AND LOCATE('I', status_code) > 0, 1, 0);
+
+            -- Insert into plant_native_status
+            INSERT IGNORE INTO plant_native_status
+                (plant_id, region_code, is_native, is_introduced, status_code)
+            VALUES
+                (p_id, region_code, @is_native, @is_introduced, status_code);
+        END WHILE;
+
+    END LOOP;
+
+    CLOSE cur;
 END$$
 
 DELIMITER ;
+
 
 ```
 
@@ -926,40 +977,111 @@ DELIMITER ;
 ```
 
 ***Poplulate State Plant for USA, CAN, MEX
-```sql
-SET FOREIGN_KEY_CHECKS = 0;
-TRUNCATE TABLE state_plant;
-SET FOREIGN_KEY_CHECKS = 1;
+```python
+import pymysql
+import csv
 
-INSERT IGNORE INTO state_plant (state_code, plant_id)
-SELECT DISTINCT
-    sr.state_code,
-    p.plant_id
-FROM usda_distribution ud
-JOIN state_region sr
-    ON sr.state_name = ud.state
-    AND sr.country_code = CASE
-        WHEN ud.country = 'United States' THEN 'USA'
-        WHEN ud.country = 'Canada' THEN 'CAN'
-        WHEN ud.country = 'Mexico' THEN 'MEX'
-    END
-JOIN plants p
-    ON p.usda_symbol = ud.symbol
-JOIN plant_native_status ns
-    ON ns.plant_id = p.plant_id
-    AND ns.region_code = 
-        CASE
-            WHEN sr.country_code='USA' THEN sr.state_code
-            WHEN sr.country_code='CAN' THEN CONCAT('CAN-', sr.province_code)
-            WHEN sr.country_code='MEX' THEN CONCAT('MEX-', sr.state_code)
-        END
-    AND ns.is_native = 1  -- only native
-WHERE COALESCE(ud.state, '') <> ''
-  AND COALESCE(ud.symbol, '') <> '';
+# --- CONFIG ---
+MYSQL_CONFIG = {
+    "host": "rizz2.cyax1patkaio.us-east-1.rds.amazonaws.com",
+    "user": "xxxxx",
+    "password": "xxxxx",
+    "database": "nativeplants",
+}
+
+BATCH_SIZE = 500  # adjust as needed
+FAILURE_LOG = "state_county_plant_failures.csv"
+
+# --- Connect to DB ---
+conn = pymysql.connect(**MYSQL_CONFIG)
+cursor = conn.cursor()
+
+# --- Prepare failure log ---
+failure_file = open(FAILURE_LOG, mode="w", newline="", encoding="utf-8")
+failure_writer = csv.writer(failure_file)
+failure_writer.writerow(["plant_id", "region_code", "error"])
+
+# --- Fetch all native plant entries (skip introduced) ---
+cursor.execute("""
+    SELECT plant_id, region_code
+    FROM plant_native_status
+    WHERE FIND_IN_SET('N', status_code)
+""")
+native_plants = cursor.fetchall()
+total = len(native_plants)
+print(f"Found {total} native plant-region entries.")
+
+# --- Clear existing state and county tables ---
+cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
+cursor.execute("TRUNCATE TABLE state_plant")
+cursor.execute("TRUNCATE TABLE county_plant")
+cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
+conn.commit()
+
+for idx, (plant_id, region_code) in enumerate(native_plants, start=1):
+    try:
+        print(f"[{idx}/{total}] Processing plant_id {plant_id} in region {region_code}")
+
+        # --- Insert state_plant ---
+        # Only include states present in USDA distribution
+        cursor.execute("""
+            INSERT IGNORE INTO state_plant (state_code, plant_id)
+            SELECT DISTINCT
+                sr.state_code,
+                %s
+            FROM usda_distribution ud
+            JOIN state_region sr
+                ON sr.state_name = ud.state
+                AND sr.country_code = CASE
+                    WHEN ud.country = 'United States' THEN 'USA'
+                    WHEN ud.country = 'Canada' THEN 'CAN'
+                    WHEN ud.country = 'Mexico' THEN 'MEX'
+                END
+            WHERE ud.symbol = (
+                SELECT usda_symbol FROM plants WHERE plant_id = %s
+            )
+              AND ud.state IS NOT NULL
+              AND ud.country IS NOT NULL
+        """, (plant_id, plant_id))
+
+        # --- Insert county_plant ---
+        cursor.execute("""
+            INSERT IGNORE INTO county_plant (county_id, plant_id)
+            SELECT DISTINCT
+                c.county_id,
+                %s
+            FROM usda_distribution ud
+            JOIN state_region sr
+                ON sr.state_name = ud.state
+                AND sr.country_code = CASE
+                    WHEN ud.country = 'United States' THEN 'USA'
+                    WHEN ud.country = 'Canada' THEN 'CAN'
+                    WHEN ud.country = 'Mexico' THEN 'MEX'
+                END
+            JOIN county c
+                ON c.county_name = ud.county
+                AND c.state_code = sr.state_code
+            WHERE ud.symbol = (
+                SELECT usda_symbol FROM plants WHERE plant_id = %s
+            )
+              AND ud.county IS NOT NULL
+        """, (plant_id, plant_id))
+
+        # Commit per plant to reduce memory pressure
+        conn.commit()
+
+    except Exception as e:
+        error_msg = str(e).replace("\n", " ")
+        print(f"❌ Failed plant_id {plant_id}: {error_msg}")
+        failure_writer.writerow([plant_id, region_code, error_msg])
+        conn.rollback()
+
+cursor.close()
+conn.close()
+failure_file.close()
+print("All done! Failures logged to:", FAILURE_LOG)
 
 ```
-
-
 
 update plants 
 join usda_plantlist on  usda_plantlist.scientific_name = plants.scientific_name
