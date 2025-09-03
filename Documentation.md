@@ -1249,8 +1249,8 @@ if __name__ == "__main__":
 # --- Config ---
 MYSQL_CONFIG = {
     "host": "rizz2.cyax1patkaio.us-east-1.rds.amazonaws.com",
-    "user": "c6xvsSTa",
-    "password": "dhqDjL,vw7t!y%RY",
+    "user": "xxxx",
+    "password": "xxxx",
     "database": "nativeplants",
 }
 
@@ -1379,4 +1379,154 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
+***Python scrip to load BONAP 'benefits' data
+
+```python
+import mysql.connector
+import os
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def load_all_tags_data(
+    host="rizz2.cyax1patkaio.us-east-1.rds.amazonaws.com",
+    user="xxxx",
+    password="xxxxx",
+    file_path=r"C:\Users\User\Documents\USANativePlantFinder\all_tags.txt",
+    table_name="all_tags",
+    database="nativeplants"
+):
+    """
+    Loads data from a tab-delimited file into the specified MySQL table.
+
+    Args:
+        host (str): Database host.
+        user (str): Database user.
+        password (str): Database password.
+        database (str): Database name.
+        file_path (str): Path to the tab-delimited input file.
+        table_name (str): Name of the table to insert data into.
+    """
+    logger.info(f"file_path: {file_path}")
+    if not os.path.exists(file_path):
+        logger.error(f"❌ Error: File not found at '{file_path}'")
+        return
+
+    conn = None
+    try:
+        # Establish database connection
+        logger.info(f"Attempting to connect to MySQL database '{database}' on host '{host}'...")
+        conn = mysql.connector.connect(
+            host=host,
+            user=user,
+            password=password,
+            database=database
+        )
+        if conn.is_connected():
+            logger.info("✅ Successfully connected to the database.")
+        else:
+            logger.error("❌ Failed to connect to the database.")
+            return
+
+        cursor = conn.cursor()
+
+        # SQL INSERT statement
+        # Assuming table has columns 'species' and 'tag'
+        insert_sql = f"INSERT INTO {table_name} (species, tag) VALUES (%s, %s)"
+
+        records_to_insert = []
+        batch_size = 1000 # Define batch size for efficient inserts
+
+        # Read data from the file
+        logger.info(f"Reading data from '{file_path}' and preparing for insertion...")
+        # Try 'utf-8-sig' first, fallback to 'latin-1' if decoding fails
+        try:
+            with open(file_path, 'r', encoding='utf-8-sig') as f:
+                lines = f.readlines()
+        except UnicodeDecodeError:
+            logger.warning("⚠️ utf-8-sig decoding failed, trying 'latin-1' encoding.")
+            with open(file_path, 'r', encoding='latin-1') as f:
+                lines = f.readlines()
+
+        for line_num, line in enumerate(lines, 1):
+            try:
+                # Strip whitespace and split by tab
+                parts = line.strip().split('\t')
+                if len(parts) == 2:
+                    species = parts[0].strip()
+                    tag = parts[1].strip()
+                    records_to_insert.append((species, tag))
+
+                    # Execute in batches
+                    if len(records_to_insert) >= batch_size:
+                        cursor.executemany(insert_sql, records_to_insert)
+                        conn.commit()
+                        logger.info(f"Inserted {len(records_to_insert)} records (up to line {line_num}).")
+                        records_to_insert = [] # Reset batch
+                else:
+                    logger.warning(f"⚠️ Skipping malformed line {line_num}: '{line.strip()}' - Expected 2 tab-separated values.")
+            except Exception as e:
+                logger.error(f"❌ Error processing line {line_num}: '{line.strip()}' - {e}")
+                # Continue to next line even if one fails
+
+        # Insert any remaining records in the last batch
+        if records_to_insert:
+            cursor.executemany(insert_sql, records_to_insert)
+            conn.commit()
+            logger.info(f"Inserted remaining {len(records_to_insert)} records.")
+
+        logger.info(f"🎉 Data loading complete for '{file_path}' into '{table_name}'.")
+
+    except mysql.connector.Error as err:
+        logger.error(f"❌ Database error: {err}")
+        if conn and conn.is_connected():
+            conn.rollback() # Rollback any uncommitted changes on error
+    except Exception as e:
+        logger.error(f"❌ An unexpected error occurred: {e}")
+    finally:
+        if conn and conn.is_connected():
+            cursor.close()
+            conn.close()
+            logger.info("Database connection closed.")
+
+if __name__ == "__main__":
+    # --- IMPORTANT: REPLACE WITH YOUR ACTUAL DATABASE CREDENTIALS ---
+    DB_HOST = "rizz2.cyax1patkaio.us-east-1.rds.amazonaws.com"
+    DB_USER = "c6xvsSTa"
+    DB_PASSWORD = "dhqDjL,vw7t!y%RY"
+    DB_NAME = "nativeplants"
+    TAGS_FILE = r"C:\Users\User\Documents\USANativePlantFinder\all_tags.txt"  # <-- Use full path here
+    TAGS_TABLE = "all_tags"
+
+    # Example usage:
+    load_all_tags_data(DB_HOST, DB_USER, DB_PASSWORD, TAGS_FILE, TAGS_TABLE, DB_NAME)
+
+
+    # You might want to add a check here to ensure the table exists
+    # If not, you could add DDL to create it:
+    # CREATE TABLE all_tags (
+    #     species VARCHAR(255) NOT NULL,
+    #     tag VARCHAR(255) NOT NULL,
+    #     PRIMARY KEY (species, tag) -- Example primary key if (species, tag) is unique
+    # );
+```
+
+***SQL to load 'benefits' tags
+```sql
+
+INSERT IGNORE INTO plant_tag (plant_id, tag_id)
+SELECT p.plant_id, t.tag_id
+FROM all_tags a
+JOIN plants p 
+  ON p.scientific_name = a.species
+JOIN tags t 
+  ON t.tag_group = 'benefits'
+ AND t.tag_description = SUBSTRING_INDEX(a.tag, '-', -1)  -- butterflies, honeybees, hummingbirds
+LEFT JOIN plant_tag pt 
+  ON pt.plant_id = p.plant_id AND pt.tag_id = t.tag_id
+WHERE a.tag LIKE 'fauna-%'
+  AND pt.plant_id IS NULL;
 ```
