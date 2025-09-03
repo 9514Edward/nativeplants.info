@@ -1115,15 +1115,19 @@ SET usda_genus_display = CONCAT(
 WHERE usda_genus IS NOT NULL AND usda_genus != '';
 
 -- ==========================================
--- 3️⃣ Populate usda_species_display
--- Strip extra description/status after '| -'
--- Examples:
--- "Malaxis monophyllos (L.) Sw. | - adder's-mouth orchid | P" -> "Malaxis monophyllos (L.) Sw."
+-- Populate usda_species_display
+-- Strip extra description/status after '| -' 
+-- and remove " | P" link from USDA data
 -- ==========================================
 UPDATE plants
-SET usda_species_display = TRIM(SUBSTRING_INDEX(usda_species, '| -', 1))
+SET usda_species_display = TRIM(
+      REPLACE(
+          SUBSTRING_INDEX(usda_species, '| -', 1),  -- remove everything after '| -'
+          '| P',                                    -- remove the trailing '| P'
+          ''
+      )
+)
 WHERE usda_species IS NOT NULL AND usda_species != '';
-
 
 
 ```
