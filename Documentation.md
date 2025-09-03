@@ -1067,20 +1067,54 @@ print("All done! Failures logged to:", FAILURE_LOG)
 ```
 **SQL cleanups for formatting **
 ```sql
-update plants 
-join usda_plantlist on  usda_plantlist.scientific_name = plants.scientific_name
-set plants.common_name = usda_plantlist.common_name where  coalesce(plants.common_name,'') = '';
+-- ==========================================
+-- 1️⃣ Update common_name from USDA plantlist
+-- ==========================================
+UPDATE plants p
+JOIN usda_plantlist u
+  ON u.scientific_name = p.scientific_name
+SET p.common_name = u.common_name
+WHERE COALESCE(p.common_name, '') = '';
 
-update plants set common_name = scientific_name where  coalesce(plants.common_name,'') = '';
-
+-- ==========================================
+-- 2️⃣ Fill any remaining empty common_name with scientific_name
+-- ==========================================
 UPDATE plants
-SET usda_family = CONCAT(
+SET common_name = scientific_name
+WHERE COALESCE(common_name, '') = '';
+
+-- ==========================================
+-- 3️⃣ Add new column for human-readable family (if it doesn't exist)
+-- ==========================================
+-- Check if the column exists
+SET @col_exists := (
+    SELECT COUNT(*) 
+    FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME = 'plants' 
+      AND COLUMN_NAME = 'usda_family_display'
+);
+
+-- Only add if it does not exist
+SET @sql := IF(@col_exists = 0, 
+               'ALTER TABLE plants ADD COLUMN usda_family_display VARCHAR(255)', 
+               'SELECT "Column already exists"');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- ==========================================
+-- 4️⃣ Populate usda_family_display
+-- ==========================================
+UPDATE plants
+SET usda_family_display = CONCAT(
       TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(usda_family, '| -', -1), '|', 1)), 
       ' (',
       TRIM(SUBSTRING_INDEX(usda_family, ' ', 1)), 
       ')'
-    )
-;
+);
+
+
 
 ```
 **Re-size Images**
