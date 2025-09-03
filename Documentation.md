@@ -1065,7 +1065,8 @@ failure_file.close()
 print("All done! Failures logged to:", FAILURE_LOG)
 
 ```
-
+**SQL cleanups for formatting **
+```sql
 update plants 
 join usda_plantlist on  usda_plantlist.scientific_name = plants.scientific_name
 set plants.common_name = usda_plantlist.common_name where  coalesce(plants.common_name,'') = '';
