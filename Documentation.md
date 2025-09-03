@@ -1084,27 +1084,7 @@ SET common_name = scientific_name
 WHERE COALESCE(common_name, '') = '';
 
 -- ==========================================
--- 3️⃣ Add new column for human-readable family (if it doesn't exist)
--- ==========================================
--- Check if the column exists
-SET @col_exists := (
-    SELECT COUNT(*) 
-    FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_SCHEMA = DATABASE() 
-      AND TABLE_NAME = 'plants' 
-      AND COLUMN_NAME = 'usda_family_display'
-);
-
--- Only add if it does not exist
-SET @sql := IF(@col_exists = 0, 
-               'ALTER TABLE plants ADD COLUMN usda_family_display VARCHAR(255)', 
-               'SELECT "Column already exists"');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- ==========================================
--- 4️⃣ Populate usda_family_display
+-- 3️⃣ Populate usda_family_display
 -- ==========================================
 UPDATE plants
 SET usda_family_display = CONCAT(
@@ -1113,6 +1093,36 @@ SET usda_family_display = CONCAT(
       TRIM(SUBSTRING_INDEX(usda_family, ' ', 1)), 
       ')'
 );
+
+
+-- ==========================================
+-- 2️⃣ Populate usda_genus_display
+-- Extract genus + authority, ignore everything after '| -'
+-- Examples handled:
+-- "Malaxis Sol. ex Sw. | - adder's-mouth orchid | P" -> "Malaxis (Sol. ex Sw.)"
+-- "Abronia ameliae" -> "Abronia"
+-- ==========================================
+UPDATE plants
+SET usda_genus_display = CONCAT(
+    TRIM(SUBSTRING_INDEX(TRIM(SUBSTRING_INDEX(usda_genus, '|', 1)), ' ', 1)), -- genus name
+    IF(LENGTH(TRIM(SUBSTRING_INDEX(TRIM(SUBSTRING_INDEX(usda_genus, '|', 1)), ' ', -1))) 
+       > LENGTH(TRIM(SUBSTRING_INDEX(TRIM(SUBSTRING_INDEX(usda_genus, '|', 1)), ' ', 1))),
+       CONCAT(' (', TRIM(SUBSTRING(usda_genus, LOCATE(' ', TRIM(SUBSTRING_INDEX(usda_genus, '|', 1))) + 1, 
+                        LENGTH(TRIM(SUBSTRING_INDEX(usda_genus, '|', 1))))), ')'),
+       ''
+    )
+)
+WHERE usda_genus IS NOT NULL AND usda_genus != '';
+
+-- ==========================================
+-- 3️⃣ Populate usda_species_display
+-- Strip extra description/status after '| -'
+-- Examples:
+-- "Malaxis monophyllos (L.) Sw. | - adder's-mouth orchid | P" -> "Malaxis monophyllos (L.) Sw."
+-- ==========================================
+UPDATE plants
+SET usda_species_display = TRIM(SUBSTRING_INDEX(usda_species, '| -', 1))
+WHERE usda_species IS NOT NULL AND usda_species != '';
 
 
 
