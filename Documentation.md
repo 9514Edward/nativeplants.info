@@ -311,7 +311,7 @@ usda_cache_path = r"C:\Users\User\Documents\USANativePlantFinder\usda_cache.json
 MYSQL_CONFIG = {
     "host": "rizz2.cyax1patkaio.us-east-1.rds.amazonaws.com",
     "user": "xxxxx",
-    "password": "xxxxx",
+    "password": "xxxxxx",
     "database": "nativeplants",
 }
 
@@ -354,66 +354,57 @@ def insert_ignore(cursor, query, params):
         print(f"MySQL Error: {err}")
 
 
-def get_commons_image_data(scientific_name, max_images=3):
+def get_commons_image_data(scientific_name, max_images=6):
     search_url = "https://commons.wikimedia.org/w/api.php"
-    headers = {
-        "User-Agent": "USANativePlantFinder/1.0 (https://nativeplants.info; admin@nativeplants.info)"
-    }
+    headers = {"User-Agent": "USANativePlantFinder/1.0"}
 
-    # Step 1: search for files
+    # Step 1: Search files
     params = {
         "action": "query",
         "format": "json",
         "list": "search",
         "srsearch": scientific_name,
-        "srnamespace": 6,   # File: namespace only
-        "srlimit": 50       # grab more so we can filter better
+        "srnamespace": 6,  # File namespace
+        "srlimit": 20
     }
+
     resp = requests.get(search_url, params=params, headers=headers, timeout=10)
     resp.raise_for_status()
-    data = resp.json()
+    results = resp.json().get("query", {}).get("search", [])
 
-    results = data.get("query", {}).get("search", [])
     if not results:
         return []
 
-    sci_lower = scientific_name.lower()
-    chosen_titles = []
+    # Step 2: Fetch imageinfo for all results (no title filtering)
+    titles = [r["title"] for r in results]
 
-    # Step 2: pick only exact scientific name matches in filenames
-    for result in results:
-        title = result.get("title", "")
-        if sci_lower in title.lower():
-            chosen_titles.append(title)
-        if len(chosen_titles) >= max_images:
-            break
-
-    # No padding — only use true matches
-    if not chosen_titles:
-        return []  # no relevant images
-
-    # Step 3: fetch imageinfo for selected files
     params = {
         "action": "query",
         "format": "json",
-        "titles": "|".join(chosen_titles),
+        "titles": "|".join(titles),
         "prop": "imageinfo",
         "iiprop": "url|extmetadata"
     }
+
     resp = requests.get(search_url, params=params, headers=headers, timeout=10)
     resp.raise_for_status()
-    data = resp.json()
+    pages = resp.json().get("query", {}).get("pages", {})
 
-    pages = data.get("query", {}).get("pages", {})
     images = []
     for page in pages.values():
-        imageinfo = page.get("imageinfo", [])
-        if imageinfo:
-            image_url = imageinfo[0].get("url")
-            attribution = imageinfo[0].get("extmetadata", {}).get("Artist", {}).get("value", "")
-            images.append((image_url, attribution))
+        for info in page.get("imageinfo", []):
+            url = info.get("url")
+            if url and not url.lower().endswith(".pdf"):
+                attribution = info.get("extmetadata", {}).get("Artist", {}).get("value", "")
+                images.append((url, attribution))
+                if len(images) >= max_images:
+                    break
+        if len(images) >= max_images:
+            break
 
     return images
+
+
 
 
 
@@ -577,12 +568,16 @@ def main():
     conn = mysql.connector.connect(**MYSQL_CONFIG)
     cursor = conn.cursor(dictionary=True)
 
+    MAX_IMAGES_PER_PLANT = 7  # Limit images per plant
+
     try:
+        # Select all base plants OR plants with no images yet
         cursor.execute("""
-            SELECT * 
-            FROM usda_plantlist 
-            WHERE synonym_symbol IS NULL  
+            SELECT *
+            FROM usda_plantlist
+            WHERE synonym_symbol IS NULL
               AND scientific_name_with_author NOT REGEXP ' var\\.| subsp\\.| ssp\\.| f\\.| forma'
+              OR symbol NOT IN (SELECT DISTINCT plant_id FROM plant_images)
             ORDER BY scientific_name;
         """)
         plants = cursor.fetchall()
@@ -591,15 +586,6 @@ def main():
             symbol = plant.get("symbol")
             scientific_name = plant.get("scientific_name")
             common_name = plant.get("common_name")
-
-            # ✅ Skip genus-level entries (no species part, or N/A / sp. / spp.)
-            species_part = None
-            if scientific_name and " " in scientific_name.strip():
-                species_part = scientific_name.strip().split(" ", 1)[1]
-
-            if not species_part or species_part.lower() in ("n/a", "sp.", "spp."):
-                print(f"⏩ Skipping genus-level entry: {scientific_name}")
-                continue
 
             base_species = get_base_species(scientific_name)
 
@@ -628,27 +614,24 @@ def main():
             row = cursor.fetchone()
             plant_id = row["plant_id"] if row else None
 
-            # Wikimedia images (up to 3)
+            # Get Wikimedia images
             wikimedia_images = get_commons_image_data(scientific_name)
 
-            # Build images list with explicit source
-            images_to_insert = []
+            # Filter out PDFs
+            wikimedia_images_filtered = [(url, "wikimedia", attr) for url, attr in wikimedia_images
+                                         if url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif'))]
 
-            # Add Wikimedia images
-            for url, attr in wikimedia_images:
-                if url:  # skip any empty URLs
-                    images_to_insert.append((url, "wikimedia", attr))
-
-            # Add USDA image if available
+            # Get USDA image
             metadata = download_distribution_csv(symbol, scientific_name, common_name, driver)
             usda_url = metadata.get("usda_image_url") if metadata else None
 
-            if usda_url:
-                # Avoid inserting the same URL twice
-                if all(usda_url != url for url, _, _ in images_to_insert):
-                    images_to_insert.append((usda_url, "usda", "USDA"))
+            # Combine images and limit to MAX_IMAGES_PER_PLANT
+            images_to_insert = wikimedia_images_filtered.copy()
+            if usda_url and all(usda_url != url for url, _, _ in images_to_insert):
+                images_to_insert.append((usda_url, "usda", "USDA"))
+            images_to_insert = images_to_insert[:MAX_IMAGES_PER_PLANT]
 
-            # Insert into DB
+            # Insert images
             for image_url, source, attribution in images_to_insert:
                 if plant_id and image_url:
                     insert_ignore(cursor,
@@ -661,56 +644,57 @@ def main():
 
             if metadata:
                 # Insert/update plant metadata
-                try:
-                    cursor.execute("""
-                        INSERT INTO plants (
-                            usda_symbol, scientific_name, common_name,
-                            usda_group, usda_duration, usda_growth_habit, usda_native_status,
-                            usda_kingdom, usda_subkingdom, usda_superdivision, usda_division,
-                            usda_class, usda_subclass, usda_order, usda_family, usda_genus,
-                            usda_species, usda_common_name
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE
-                            scientific_name=VALUES(scientific_name),
-                            common_name=VALUES(common_name),
-                            usda_group=VALUES(usda_group),
-                            usda_duration=VALUES(usda_duration),
-                            usda_growth_habit=VALUES(usda_growth_habit),
-                            usda_native_status=VALUES(usda_native_status),
-                            usda_kingdom=VALUES(usda_kingdom),
-                            usda_subkingdom=VALUES(usda_subkingdom),
-                            usda_superdivision=VALUES(usda_superdivision),
-                            usda_division=VALUES(usda_division),
-                            usda_class=VALUES(usda_class),
-                            usda_subclass=VALUES(usda_subclass),
-                            usda_order=VALUES(usda_order),
-                            usda_family=VALUES(usda_family),
-                            usda_genus=VALUES(usda_genus),
-                            usda_species=VALUES(usda_species),
-                            usda_common_name=VALUES(usda_common_name)
-                    """, (
-                        symbol,
-                        metadata.get("scientific_name"),
-                        metadata.get("common_name"),
-                        metadata.get("group"),
-                        metadata.get("duration"),
-                        metadata.get("growth_habits") or metadata.get("growth_habit"),
-                        metadata.get("native_status"),
-                        metadata.get("kingdom"),
-                        metadata.get("subkingdom"),
-                        metadata.get("superdivision"),
-                        metadata.get("division"),
-                        metadata.get("class"),
-                        metadata.get("subclass"),
-                        metadata.get("order"),
-                        metadata.get("family"),
-                        metadata.get("genus"),
-                        metadata.get("species"),
-                        metadata.get("usda_common_name")
-                    ))
-                    print(f"✅ Plant {scientific_name} inserted with images and USDA data.")
-                except mysql.connector.Error as err:
-                    print(f"❌ DB error for {symbol}: {err}")
+                if metadata.get("species") and metadata.get("species").upper() != 'N/A':
+                    try:
+                        cursor.execute("""
+                            INSERT INTO plants (
+                                usda_symbol, scientific_name, common_name,
+                                usda_group, usda_duration, usda_growth_habit, usda_native_status,
+                                usda_kingdom, usda_subkingdom, usda_superdivision, usda_division,
+                                usda_class, usda_subclass, usda_order, usda_family, usda_genus,
+                                usda_species, usda_common_name
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE
+                                scientific_name=VALUES(scientific_name),
+                                common_name=VALUES(common_name),
+                                usda_group=VALUES(usda_group),
+                                usda_duration=VALUES(usda_duration),
+                                usda_growth_habit=VALUES(usda_growth_habit),
+                                usda_native_status=VALUES(usda_native_status),
+                                usda_kingdom=VALUES(usda_kingdom),
+                                usda_subkingdom=VALUES(usda_subkingdom),
+                                usda_superdivision=VALUES(usda_superdivision),
+                                usda_division=VALUES(usda_division),
+                                usda_class=VALUES(usda_class),
+                                usda_subclass=VALUES(usda_subclass),
+                                usda_order=VALUES(usda_order),
+                                usda_family=VALUES(usda_family),
+                                usda_genus=VALUES(usda_genus),
+                                usda_species=VALUES(usda_species),
+                                usda_common_name=VALUES(usda_common_name)
+                        """, (
+                            symbol,
+                            metadata.get("scientific_name"),
+                            metadata.get("common_name"),
+                            metadata.get("group"),
+                            metadata.get("duration"),
+                            metadata.get("growth_habits") or metadata.get("growth_habit"),
+                            metadata.get("native_status"),
+                            metadata.get("kingdom"),
+                            metadata.get("subkingdom"),
+                            metadata.get("superdivision"),
+                            metadata.get("division"),
+                            metadata.get("class"),
+                            metadata.get("subclass"),
+                            metadata.get("order"),
+                            metadata.get("family"),
+                            metadata.get("genus"),
+                            metadata.get("species"),
+                            metadata.get("usda_common_name")
+                        ))
+                        print(f"✅ Plant {scientific_name} inserted with images and USDA data.")
+                    except mysql.connector.Error as err:
+                        print(f"❌ DB error for {symbol}: {err}")
 
                 # Update distribution data
                 cursor.execute("DELETE FROM usda_distribution WHERE `Symbol` = %s", (symbol,))
@@ -728,7 +712,6 @@ def main():
         cursor.close()
         conn.close()
         driver.quit()
-
 
 
 if __name__ == "__main__":
