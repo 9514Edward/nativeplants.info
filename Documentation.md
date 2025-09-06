@@ -879,14 +879,11 @@ DROP PROCEDURE IF EXISTS normalize_native_status_all_countries;
 
 DELIMITER $$
 
-CREATE PROCEDURE normalize_native_status_all_countries()
+CREATE PROCEDURE `normalize_native_status_all_countries`()
 BEGIN
     DECLARE done INT DEFAULT 0;
     DECLARE p_id INT;
     DECLARE raw_status TEXT;
-    DECLARE region_status TEXT;
-    DECLARE region_code VARCHAR(10);
-    DECLARE status_code VARCHAR(10);
 
     DECLARE cur CURSOR FOR 
         SELECT plant_id, usda_native_status 
@@ -909,40 +906,41 @@ BEGIN
         -- Remove leading/trailing spaces
         SET raw_status = TRIM(raw_status);
 
-        -- Split by ' | | ' to get each region-status pair
-        WHILE LENGTH(raw_status) > 0 DO
-            -- Find next separator
-            SET @sep_pos = INSTR(raw_status, ' | | ');
+        -- Split by single pipe ' | ' to get each region-status pair
+        SET @parts := raw_status;
+        WHILE LENGTH(@parts) > 0 DO
+            -- Find position of next separator
+            SET @sep_pos := INSTR(@parts, ' | ');
             IF @sep_pos > 0 THEN
-                SET region_status = LEFT(raw_status, @sep_pos - 1);
-                SET raw_status = SUBSTRING(raw_status, @sep_pos + 5);
+                SET @region_status := LEFT(@parts, @sep_pos - 1);
+                SET @parts := SUBSTRING(@parts, @sep_pos + 3); -- +3 because ' | ' is 3 chars
             ELSE
-                SET region_status = raw_status;
-                SET raw_status = '';
+                SET @region_status := @parts;
+                SET @parts := '';
             END IF;
 
-            -- Clean extra spaces
-            SET region_status = TRIM(region_status);
+            -- Clean spaces
+            SET @region_status = TRIM(@region_status);
 
             -- Split region and status
-            SET @space_pos = INSTR(region_status, ' ');
+            SET @space_pos := INSTR(@region_status, ' ');
             IF @space_pos > 0 THEN
-                SET region_code = TRIM(LEFT(region_status, @space_pos - 1));
-                SET status_code = TRIM(SUBSTRING(region_status, @space_pos + 1));
+                SET @region_code := LEFT(@region_status, @space_pos - 1);
+                SET @status_code := SUBSTRING(@region_status, @space_pos + 1);
             ELSE
-                SET region_code = region_status;
-                SET status_code = NULL;
+                SET @region_code := @region_status;
+                SET @status_code := NULL;
             END IF;
 
             -- Determine flags
-            SET @is_native = IF(status_code IS NOT NULL AND LOCATE('N', status_code) > 0, 1, 0);
-            SET @is_introduced = IF(status_code IS NOT NULL AND LOCATE('I', status_code) > 0, 1, 0);
+            SET @is_native := IF(@status_code IS NOT NULL AND LOCATE('N', @status_code) > 0, 1, 0);
+            SET @is_introduced := IF(@status_code IS NOT NULL AND LOCATE('I', @status_code) > 0, 1, 0);
 
             -- Insert into plant_native_status
             INSERT IGNORE INTO plant_native_status
                 (plant_id, region_code, is_native, is_introduced, status_code)
             VALUES
-                (p_id, region_code, @is_native, @is_introduced, status_code);
+                (p_id, @region_code, @is_native, @is_introduced, @status_code);
         END WHILE;
 
     END LOOP;
