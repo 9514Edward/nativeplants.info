@@ -408,7 +408,6 @@ def get_commons_image_data(scientific_name, max_images=6):
 
 
 
-
 def download_distribution_csv(symbol, scientific_name, common_name, driver):
     """
     Scrapes USDA metadata tables and distribution CSV from the plant profile page.
@@ -436,10 +435,12 @@ def download_distribution_csv(symbol, scientific_name, common_name, driver):
                     key = th.find_element(By.TAG_NAME, "h3").text.strip().lower().replace(" ", "_")
                     spans = td.find_elements(By.TAG_NAME, "span")
                     if spans:
-                        value = " | ".join(span.text.strip() for span in spans if span.text.strip())
+                        texts = [span.text.strip() for span in spans]
+                        value = " | ".join([t for t in texts if t])  # preserve last element, no orphan pipes
                     else:
                         value = td.text.strip()
                     metadata[key] = value
+
                 except Exception:
                     continue
         except Exception:
@@ -967,8 +968,8 @@ import csv
 # --- CONFIG ---
 MYSQL_CONFIG = {
     "host": "rizz2.cyax1patkaio.us-east-1.rds.amazonaws.com",
-    "user": "xxxxx",
-    "password": "xxxxx",
+    "user": "xxxxxx",
+    "password": "xxxxxxxx",
     "database": "nativeplants",
 }
 
@@ -983,6 +984,15 @@ cursor = conn.cursor()
 failure_file = open(FAILURE_LOG, mode="w", newline="", encoding="utf-8")
 failure_writer = csv.writer(failure_file)
 failure_writer.writerow(["plant_id", "region_code", "error"])
+
+# - Fix a data issue in usda_native_status with double ' | ' -
+cursor.execute("""
+-- Fix entries with double ' | ' in usda_native_status
+UPDATE plants
+SET usda_native_status = REPLACE(usda_native_status, ' | | ', ' | ')
+WHERE usda_native_status LIKE '%| |%';
+""")
+
 
 # --- Fetch all native plant entries (skip introduced) ---
 cursor.execute("""
@@ -1063,71 +1073,6 @@ cursor.close()
 conn.close()
 failure_file.close()
 print("All done! Failures logged to:", FAILURE_LOG)
-
-```
-**SQL cleanups for formatting **
-```sql
--- ==========================================
--- 1️⃣ Update common_name from USDA plantlist
--- ==========================================
-UPDATE plants p
-JOIN usda_plantlist u
-  ON u.scientific_name = p.scientific_name
-SET p.common_name = u.common_name
-WHERE COALESCE(p.common_name, '') = '';
-
--- ==========================================
--- 2️⃣ Fill any remaining empty common_name with scientific_name
--- ==========================================
-UPDATE plants
-SET common_name = scientific_name
-WHERE COALESCE(common_name, '') = '';
-
--- ==========================================
--- 3️⃣ Populate usda_family_display
--- ==========================================
-UPDATE plants
-SET usda_family_display = CONCAT(
-      TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(usda_family, '| -', -1), '|', 1)), 
-      ' (',
-      TRIM(SUBSTRING_INDEX(usda_family, ' ', 1)), 
-      ')'
-);
-
-
--- ==========================================
--- 2️⃣ Populate usda_genus_display
--- Extract genus + authority, ignore everything after '| -'
--- Examples handled:
--- "Malaxis Sol. ex Sw. | - adder's-mouth orchid | P" -> "Malaxis (Sol. ex Sw.)"
--- "Abronia ameliae" -> "Abronia"
--- ==========================================
-UPDATE plants
-SET usda_genus_display = CONCAT(
-    TRIM(SUBSTRING_INDEX(TRIM(SUBSTRING_INDEX(usda_genus, '|', 1)), ' ', 1)), -- genus name
-    IF(LENGTH(TRIM(SUBSTRING_INDEX(TRIM(SUBSTRING_INDEX(usda_genus, '|', 1)), ' ', -1))) 
-       > LENGTH(TRIM(SUBSTRING_INDEX(TRIM(SUBSTRING_INDEX(usda_genus, '|', 1)), ' ', 1))),
-       CONCAT(' (', TRIM(SUBSTRING(usda_genus, LOCATE(' ', TRIM(SUBSTRING_INDEX(usda_genus, '|', 1))) + 1, 
-                        LENGTH(TRIM(SUBSTRING_INDEX(usda_genus, '|', 1))))), ')'),
-       ''
-    )
-)
-WHERE usda_genus IS NOT NULL AND usda_genus != '';
-
--- ==========================================
--- Populate usda_species_display
--- Strip extra description/status after '| -' 
--- and remove " | P" link from USDA data
--- ==========================================
-UPDATE plants
-SET usda_species_display = TRIM(
-      REPLACE(
-          SUBSTRING_INDEX(usda_species, '| -', 1),  -- remove everything after '| -'
-          '| P',                                    -- remove the trailing '| P'
-          ''
-      )
-)
-WHERE usda_species IS NOT NULL AND usda_species != '';
 
 
 ```
