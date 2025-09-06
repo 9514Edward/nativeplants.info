@@ -1579,3 +1579,100 @@ LEFT JOIN plant_tag pt
 WHERE a.tag LIKE 'fauna-%'
   AND pt.plant_id IS NULL;
 ```
+***SQL to create rankings
+```sql
+
+
+use nativeplants;
+-- Store rounded integer averages (no truncation)
+ALTER TABLE nwf_keystone CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+UPDATE nwf_keystone nk
+JOIN (
+    SELECT genus, ROUND(AVG(pollenspecialists)) AS avg_pollenspecialists
+    FROM nwf_keystone
+    GROUP BY genus
+) ga ON nk.genus = ga.genus
+SET nk.averagepollenspecialists = ga.avg_pollenspecialists;
+
+UPDATE nwf_keystone nk
+JOIN (
+    SELECT genus, ROUND(AVG(caterpillars)) AS avg_caterpillars
+    FROM nwf_keystone
+    GROUP BY genus
+) ga ON nk.genus = ga.genus
+SET nk.averagecaterpillars = ga.avg_caterpillars;
+
+-- Rankings on 1–5 scale (0 if genus avg = 0)
+-- Caterpillar ranking (0 if genus avg = 0, otherwise 1–5)
+UPDATE nwf_keystone nk
+JOIN (
+    SELECT genus,
+           CASE 
+             WHEN AVG(caterpillars) = 0 THEN 0
+             ELSE ROUND(
+                (AVG(caterpillars) - MIN(AVG(caterpillars)) OVER()) /
+                NULLIF(MAX(AVG(caterpillars)) OVER() - MIN(AVG(caterpillars)) OVER(),0) * 4
+             ) + 1
+           END AS rank_val
+    FROM nwf_keystone
+    GROUP BY genus
+) ga ON nk.genus = ga.genus
+SET nk.caterpillarRanking = ga.rank_val;
+
+-- Pollen specialist ranking (0 if genus avg = 0, otherwise 1–5)
+UPDATE nwf_keystone nk
+JOIN (
+    SELECT genus,
+           CASE 
+             WHEN AVG(pollenspecialists) = 0 THEN 0
+             ELSE ROUND(
+                (AVG(pollenspecialists) - MIN(AVG(pollenspecialists)) OVER()) /
+                NULLIF(MAX(AVG(pollenspecialists)) OVER() - MIN(AVG(pollenspecialists)) OVER(),0) * 4
+             ) + 1
+           END AS rank_val
+    FROM nwf_keystone
+    GROUP BY genus
+) ga ON nk.genus = ga.genus
+SET nk.pollenspecialistRanking = ga.rank_val;
+
+update nwf_keystone set genus = 'Symphyotrichum' where genus = 'Symphyatrichum';
+
+UPDATE plants p
+JOIN nwf_keystone nk
+  ON p.usda_genus_display = nk.genus
+SET p.pollinator_ranking   = nk.pollenspecialistRanking,
+    p.caterpillar_ranking = nk.caterpillarRanking;
+
+UPDATE plants p
+LEFT JOIN (
+    SELECT pt.plant_id,
+           SUM(pt.tag_id IN (2,3)) AS bonap_pollinator_score
+    FROM plant_tag pt
+    WHERE pt.tag_id IN (2,3)
+    GROUP BY pt.plant_id
+) b ON p.plant_id = b.plant_id
+SET p.pollinator_ranking =
+    CASE
+        WHEN p.pollinator_ranking IS NULL OR p.pollinator_ranking = 0 THEN
+            ROUND(b.bonap_pollinator_score / 2.0 * 5)
+        ELSE p.pollinator_ranking
+    END;
+
+select * from plants limit 100;
+update plants set pollinator_ranking = 0 where pollinator_ranking is null;
+update plants set caterpillar_ranking = 0 where caterpillar_ranking is null;
+
+SELECT COUNT(*) AS zero_star_plants
+FROM plants
+WHERE pollinator_ranking is not null
+  AND usda_family_display NOT IN (
+        'Pinaceae',   -- pines
+        'Cupressaceae', -- cypress, juniper
+        'Ginkgoaceae',  -- ginkgo
+        'Pteridaceae',  -- ferns
+        'Polypodiaceae' -- more ferns
+        -- add other families to exclude as needed
+  );
+  ```
+
+
