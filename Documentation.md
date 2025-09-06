@@ -966,8 +966,8 @@ import csv
 # --- CONFIG ---
 MYSQL_CONFIG = {
     "host": "rizz2.cyax1patkaio.us-east-1.rds.amazonaws.com",
-    "user": "xxxxxx",
-    "password": "xxxxxxxx",
+    "user": "xxxxx",
+    "password": "xxxxxx",
     "database": "nativeplants",
 }
 
@@ -990,6 +990,8 @@ UPDATE plants
 SET usda_native_status = REPLACE(usda_native_status, ' | | ', ' | ')
 WHERE usda_native_status LIKE '%| |%';
 """)
+
+
 
 
 # --- Fetch all native plant entries (skip introduced) ---
@@ -1067,11 +1069,17 @@ for idx, (plant_id, region_code) in enumerate(native_plants, start=1):
         failure_writer.writerow([plant_id, region_code, error_msg])
         conn.rollback()
 
+cursor.execute("""UPDATE plants p
+LEFT JOIN state_plant sp ON sp.plant_id = p.plant_id
+SET p.is_state_plant = (sp.plant_id IS NOT NULL);
+""")
 cursor.close()
 conn.close()
 failure_file.close()
-print("All done! Failures logged to:", FAILURE_LOG)
 
+
+
+print("All done! Failures logged to:", FAILURE_LOG)
 
 ```
 **Re-size Images**
