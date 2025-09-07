@@ -1646,43 +1646,129 @@ SET FOREIGN_KEY_CHECKS = 0;
 TRUNCATE TABLE region_plant;
 
 -- 3. Rebuild region_plant from usda_distribution
--- Disable FK checks
+CREATE DEFINER=`c6xvsSTa`@`%` PROCEDURE `make_region_plants`()
+BEGIN
+UPDATE plants
+SET usda_native_status = REPLACE(usda_native_status, ' | | ', ' | ')
+WHERE usda_native_status LIKE '%| |%';
+
+
+delete from usda_distribution where symbol = '';
+
+
+
+-- 1. Clear existing mappings
 SET FOREIGN_KEY_CHECKS = 0;
-
--- Clear region_plant
 TRUNCATE TABLE region_plant;
-
--- Rebuild region_plant
-INSERT INTO region_plant (plant_id, region_id)
-SELECT
-    p.plant_id AS plant_id,
-    r.region_id AS region_id
-FROM plants p
-JOIN usda_distribution ud
-    ON ud.Symbol = p.usda_symbol
-JOIN region r
-    ON (
-        -- Match states
-        (ud.Country = 'United States' AND r.country_code = 'USA' AND r.region_code = ud.State)
-        OR
-        (ud.Country = 'Canada' AND r.country_code = 'CAN' AND r.region_code = ud.State)
-        OR
-        (ud.Country = 'Mexico' AND r.country_code = 'MEX' AND r.region_code = ud.State)
-        OR
-        -- Match counties
-        (ud.Country = 'United States' AND r.country_code = 'USA' AND r.region_type = 'County' AND r.region_name = ud.County)
-        OR
-        (ud.Country = 'Canada' AND r.country_code = 'CAN' AND r.region_type = 'County' AND r.region_name = ud.County)
-        OR
-        (ud.Country = 'Mexico' AND r.country_code = 'MEX' AND r.region_type = 'County' AND r.region_name = ud.County)
-    )
-WHERE ud.Country IS NOT NULL
-  AND (ud.State IS NOT NULL OR ud.County IS NOT NULL)
-ON DUPLICATE KEY UPDATE region_id = r.region_id;  -- explicit alias here
-
-
--- 5. Re-enable foreign key checks
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- 2. Insert distinct plant-region links from USDA distribution
+CREATE DEFINER=`c6xvsSTa`@`%` PROCEDURE `make_region_plants`()
+BEGIN
+UPDATE plants
+SET usda_native_status = REPLACE(usda_native_status, ' | | ', ' | ')
+WHERE usda_native_status LIKE '%| |%';
+
+
+delete from usda_distribution where symbol = '';
+
+
+
+-- 1. Clear existing mappings
+SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE region_plant;
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- 2. Insert distinct plant-region links from USDA distribution
+INSERT INTO region_plant (plant_id, region_id)
+SELECT DISTINCT p.plant_id, r.region_id
+FROM usda_distribution ud
+JOIN plants p
+  ON p.usda_symbol = ud.Symbol
+ AND p.usda_native_status LIKE '%N%'
+
+-- Country join
+LEFT JOIN region c
+  ON c.region_type = 'Country'
+ AND c.region_name = ud.Country
+
+-- State join (must match country parent)
+LEFT JOIN region s
+  ON s.region_type = 'State'
+ AND s.region_name = ud.State
+ AND s.parent_region_id = c.region_id
+
+-- County join (must match state parent)
+LEFT JOIN region co
+  ON co.region_type = 'County'
+ AND co.region_name = ud.County
+ AND co.parent_region_id = s.region_id
+
+-- Use whichever matched: county > state > country
+JOIN region r
+  ON r.region_id = COALESCE(co.region_id, s.region_id, c.region_id)
+
+WHERE (ud.Country IS NOT NULL OR ud.State IS NOT NULL OR ud.County IS NOT NULL);
+
+-- 3. Ensure every county-linked plant also has its parent state
+INSERT IGNORE INTO region_plant (plant_id, region_id)
+SELECT DISTINCT rp.plant_id, s.region_id
+FROM region_plant rp
+JOIN region co
+  ON co.region_id = rp.region_id
+ AND co.region_type = 'County'
+JOIN region s
+  ON s.region_id = co.parent_region_id
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM region_plant rp2
+    WHERE rp2.plant_id = rp.plant_id
+      AND rp2.region_id = s.region_id
+);
+
+-- 4. Ensure every state-linked plant also has its parent country
+INSERT IGNORE INTO region_plant (plant_id, region_id)
+SELECT DISTINCT rp.plant_id, c.region_id
+FROM region_plant rp
+JOIN region s
+  ON s.region_id = rp.region_id
+ AND s.region_type = 'State'
+JOIN region c
+  ON c.region_id = s.parent_region_id
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM region_plant rp2
+    WHERE rp2.plant_id = rp.plant_id
+      AND rp2.region_id = c.region_id
+);
+
+-- 5. Ensure every county-linked plant also has its parent country (via state)
+INSERT IGNORE INTO region_plant (plant_id, region_id)
+SELECT DISTINCT rp.plant_id, c.region_id
+FROM region_plant rp
+JOIN region co
+  ON co.region_id = rp.region_id
+ AND co.region_type = 'County'
+JOIN region s
+  ON s.region_id = co.parent_region_id
+JOIN region c
+  ON c.region_id = s.parent_region_id
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM region_plant rp2
+    WHERE rp2.plant_id = rp.plant_id
+      AND rp2.region_id = c.region_id
+);
+
+-- 6. (Optional) Flag plants that have region links
+UPDATE plants p
+SET p.is_state_plant = EXISTS (
+    SELECT 1
+    FROM region_plant rp
+    WHERE rp.plant_id = p.plant_id
+);
+
+END
 
 
   ```
