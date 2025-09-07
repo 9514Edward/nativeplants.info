@@ -1624,6 +1624,20 @@ WHERE pollinator_ranking is not null
         'Polypodiaceae' -- more ferns
         -- add other families to exclude as needed
   );
+
+CREATE TABLE plant_images_agg AS
+SELECT plant_id, GROUP_CONCAT(internal_image_url ORDER BY image_id ASC SEPARATOR ',') AS images
+FROM plant_images
+GROUP BY plant_id;
+
+CREATE TABLE plant_tags_agg AS
+SELECT pt.plant_id,
+       GROUP_CONCAT(DISTINCT CONCAT(tag_group, ': ', tag_description) ORDER BY tag_group, tag_description ASC SEPARATOR ',') AS tags
+FROM plant_tag pt
+JOIN tags t ON t.tag_id = pt.tag_id
+GROUP BY pt.plant_id;
+
+
   ```
 
 
