@@ -1638,6 +1638,53 @@ JOIN tags t ON t.tag_id = pt.tag_id
 GROUP BY pt.plant_id;
 
 
+-- 1. Disable foreign key checks for safe truncation
+-- 1. Disable foreign key checks
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- 2. Clear the region_plant table
+TRUNCATE TABLE region_plant;
+
+-- 3. Rebuild region_plant from usda_distribution
+-- Disable FK checks
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- Clear region_plant
+TRUNCATE TABLE region_plant;
+
+-- Rebuild region_plant
+INSERT INTO region_plant (plant_id, region_id)
+SELECT
+    p.plant_id AS plant_id,
+    r.region_id AS region_id
+FROM plants p
+JOIN usda_distribution ud
+    ON ud.Symbol = p.usda_symbol
+JOIN region r
+    ON (
+        -- Match states
+        (ud.Country = 'United States' AND r.country_code = 'USA' AND r.region_code = ud.State)
+        OR
+        (ud.Country = 'Canada' AND r.country_code = 'CAN' AND r.region_code = ud.State)
+        OR
+        (ud.Country = 'Mexico' AND r.country_code = 'MEX' AND r.region_code = ud.State)
+        OR
+        -- Match counties
+        (ud.Country = 'United States' AND r.country_code = 'USA' AND r.region_type = 'County' AND r.region_name = ud.County)
+        OR
+        (ud.Country = 'Canada' AND r.country_code = 'CAN' AND r.region_type = 'County' AND r.region_name = ud.County)
+        OR
+        (ud.Country = 'Mexico' AND r.country_code = 'MEX' AND r.region_type = 'County' AND r.region_name = ud.County)
+    )
+WHERE ud.Country IS NOT NULL
+  AND (ud.State IS NOT NULL OR ud.County IS NOT NULL)
+ON DUPLICATE KEY UPDATE region_id = r.region_id;  -- explicit alias here
+
+
+-- 5. Re-enable foreign key checks
+SET FOREIGN_KEY_CHECKS = 1;
+
+
   ```
 
 
