@@ -724,141 +724,56 @@ if __name__ == "__main__":
 **Populate state_region and other data fixes/initializations**
 
 ```sql
-SET FOREIGN_KEY_CHECKS = 0;
-truncate table state_region;
-SET FOREIGN_KEY_CHECKS = 1;
-INSERT IGNORE INTO state_region (state_name, state_code, country_code)
-SELECT DISTINCT 
-    state,
-    CASE 
-        WHEN state = 'Alabama' THEN 'AL'
-        WHEN state = 'Alaska' THEN 'AK'
-        WHEN state = 'Arizona' THEN 'AZ'
-        WHEN state = 'Arkansas' THEN 'AR'
-        WHEN state = 'California' THEN 'CA'
-        WHEN state = 'Colorado' THEN 'CO'
-        WHEN state = 'Connecticut' THEN 'CT'
-        WHEN state = 'Delaware' THEN 'DE'
-        WHEN state = 'District of Columbia' THEN 'DC'
-        WHEN state = 'Florida' THEN 'FL'
-        WHEN state = 'Georgia' THEN 'GA'
-        WHEN state = 'Hawaii' THEN 'HI'
-        WHEN state = 'Idaho' THEN 'ID'
-        WHEN state = 'Illinois' THEN 'IL'
-        WHEN state = 'Indiana' THEN 'IN'
-        WHEN state = 'Iowa' THEN 'IA'
-        WHEN state = 'Kansas' THEN 'KS'
-        WHEN state = 'Kentucky' THEN 'KY'
-        WHEN state = 'Louisiana' THEN 'LA'
-        WHEN state = 'Maine' THEN 'ME'
-        WHEN state = 'Maryland' THEN 'MD'
-        WHEN state = 'Massachusetts' THEN 'MA'
-        WHEN state = 'Michigan' THEN 'MI'
-        WHEN state = 'Minnesota' THEN 'MN'
-        WHEN state = 'Mississippi' THEN 'MS'
-        WHEN state = 'Missouri' THEN 'MO'
-        WHEN state = 'Montana' THEN 'MT'
-        WHEN state = 'Nebraska' THEN 'NE'
-        WHEN state = 'Nevada' THEN 'NV'
-        WHEN state = 'New Hampshire' THEN 'NH'
-        WHEN state = 'New Jersey' THEN 'NJ'
-        WHEN state = 'New Mexico' THEN 'NM'
-        WHEN state = 'New York' THEN 'NY'
-        WHEN state = 'North Carolina' THEN 'NC'
-        WHEN state = 'North Dakota' THEN 'ND'
-        WHEN state = 'Ohio' THEN 'OH'
-        WHEN state = 'Oklahoma' THEN 'OK'
-        WHEN state = 'Oregon' THEN 'OR'
-        WHEN state = 'Pennsylvania' THEN 'PA'
-        WHEN state = 'Rhode Island' THEN 'RI'
-        WHEN state = 'South Carolina' THEN 'SC'
-        WHEN state = 'South Dakota' THEN 'SD'
-        WHEN state = 'Tennessee' THEN 'TN'
-        WHEN state = 'Texas' THEN 'TX'
-        WHEN state = 'Utah' THEN 'UT'
-        WHEN state = 'Vermont' THEN 'VT'
-        WHEN state = 'Virginia' THEN 'VA'
-        WHEN state = 'Washington' THEN 'WA'
-        WHEN state = 'West Virginia' THEN 'WV'
-        WHEN state = 'Wisconsin' THEN 'WI'
-        WHEN state = 'Wyoming' THEN 'WY'
-        WHEN state = 'Alberta' THEN 'AB'
-        WHEN state = 'British Columbia' THEN 'BC'
-        WHEN state = 'Manitoba' THEN 'MB'
-        WHEN state = 'New Brunswick' THEN 'NB'
-        WHEN state = 'Newfoundland and Labrador' THEN 'NL'
-        WHEN state = 'Northwest Territories' THEN 'NT'
-        WHEN state = 'Nova Scotia' THEN 'NS'
-        WHEN state = 'Nunavut' THEN 'NU'
-        WHEN state = 'Ontario' THEN 'ON'
-        WHEN state = 'Prince Edward Island' THEN 'PE'
-        WHEN state = 'Quebec' THEN 'QC'
-        WHEN state = 'Saskatchewan' THEN 'SK'
-        WHEN state = 'Yukon' THEN 'YT'
-        WHEN state = 'Aguascalientes' THEN 'AGU'
-        WHEN state = 'Baja California' THEN 'BCN'
-        WHEN state = 'Baja California Sur' THEN 'BCS'
-        WHEN state = 'Campeche' THEN 'CAM'
-        WHEN state = 'Chiapas' THEN 'CHP'
-        WHEN state = 'Chihuahua' THEN 'CHH'
-        WHEN state = 'Coahuila' THEN 'COA'
-        WHEN state = 'Colima' THEN 'COL'
-        WHEN state = 'Durango' THEN 'DUR'
-        WHEN state = 'Guanajuato' THEN 'GUA'
-        WHEN state = 'Guerrero' THEN 'GRO'
-        WHEN state = 'Hidalgo' THEN 'HID'
-        WHEN state = 'Jalisco' THEN 'JAL'
-        WHEN state = 'Mexico State' THEN 'MEX'
-        WHEN state = 'Michoacán' THEN 'MIC'
-        WHEN state = 'Morelos' THEN 'MOR'
-        WHEN state = 'Nayarit' THEN 'NAY'
-        WHEN state = 'Nuevo León' THEN 'NLE'
-        WHEN state = 'Oaxaca' THEN 'OAX'
-        WHEN state = 'Puebla' THEN 'PUE'
-        WHEN state = 'Querétaro' THEN 'QUE'
-        WHEN state = 'Quintana Roo' THEN 'ROO'
-        WHEN state = 'San Luis Potosí' THEN 'SLP'
-        WHEN state = 'Sinaloa' THEN 'SIN'
-        WHEN state = 'Sonora' THEN 'SON'
-        WHEN state = 'Tabasco' THEN 'TAB'
-        WHEN state = 'Tamaulipas' THEN 'TAM'
-        WHEN state = 'Tlaxcala' THEN 'TLA'
-        WHEN state = 'Veracruz' THEN 'VER'
-        WHEN state = 'Yucatán' THEN 'YUC'
-        WHEN state = 'Zacatecas' THEN 'ZAC'
-    END AS state_code,
-    CASE 
-        WHEN country = 'United States' THEN 'USA'
-        WHEN country = 'Canada' THEN 'CAN'
-        WHEN country = 'Mexico' THEN 'MEX'
-    END AS country_code
-FROM usda_distribution;
 
-SET FOREIGN_KEY_CHECKS = 0;
-truncate table county;
-SET FOREIGN_KEY_CHECKS = 1;
+-- Add U.S. Territories / Dependencies as "State" level regions
+INSERT INTO region (region_code, region_name, region_type, country_code, parent_region_id)
+SELECT 'GU', 'Guam', 'State', 'USA', c.region_id
+FROM region c WHERE c.region_type = 'Country' AND c.region_code = 'USA';
 
-INSERT IGNORE INTO county (country_code, state_code, county_name)
-SELECT DISTINCT 
-    country.country_code,
-    state_region.state_code,
-    usda_distribution.County
-FROM usda_distribution
-JOIN state_region 
-    ON state_region.state_name = usda_distribution.state
-    AND state_region.country_code = 
-        CASE 
-            WHEN usda_distribution.country = 'United States' THEN 'USA'
-            WHEN usda_distribution.country = 'Canada' THEN 'CAN'
-            WHEN usda_distribution.country = 'Mexico' THEN 'MEX'
-        END
-JOIN country 
-    ON country.country_name = usda_distribution.country
-WHERE COALESCE(usda_distribution.County, '') <> '';
+INSERT INTO region (region_code, region_name, region_type, country_code, parent_region_id)
+SELECT 'PW', 'Palau', 'State', 'USA', c.region_id
+FROM region c WHERE c.region_type = 'Country' AND c.region_code = 'USA';
 
-SET FOREIGN_KEY_CHECKS = 0;
-truncate table state_plant;
-SET FOREIGN_KEY_CHECKS = 1;
+INSERT INTO region (region_code, region_name, region_type, country_code, parent_region_id)
+SELECT 'PR', 'Puerto Rico', 'State', 'USA', c.region_id
+FROM region c WHERE c.region_type = 'Country' AND c.region_code = 'USA';
+
+INSERT INTO region (region_code, region_name, region_type, country_code, parent_region_id)
+SELECT 'VI', 'Virgin Islands', 'State', 'USA', c.region_id
+FROM region c WHERE c.region_type = 'Country' AND c.region_code = 'USA';
+
+INSERT INTO region (region_code, region_name, region_type, country_code, parent_region_id)
+SELECT 'DC', 'District of Columbia', 'State', 'USA', c.region_id
+FROM region c WHERE c.region_type = 'Country' AND c.region_code = 'USA';
+
+INSERT INTO region (region_code, region_name, region_type, country_code, parent_region_id)
+SELECT 'UM', 'U.S. Minor Outlying Islands', 'State', 'USA', c.region_id
+FROM region c WHERE c.region_type = 'Country' AND c.region_code = 'USA';
+
+INSERT INTO region (region_code, region_name, region_type, country_code, parent_region_id)
+SELECT 'NI', 'Navassa Island', 'State', 'USA', c.region_id
+FROM region c WHERE c.region_type = 'Country' AND c.region_code = 'USA';
+
+INSERT INTO region (region_code, region_name, region_type, country_code, parent_region_id)
+SELECT 'FM', 'Federated States of Micronesia', 'State', 'USA', c.region_id
+FROM region c WHERE c.region_type = 'Country' AND c.region_code = 'USA';
+
+INSERT INTO region (region_code, region_name, region_type, country_code, parent_region_id)
+SELECT 'MH', 'Marshall Islands', 'State', 'USA', c.region_id
+FROM region c WHERE c.region_type = 'Country' AND c.region_code = 'USA';
+
+INSERT INTO region (region_code, region_name, region_type, country_code, parent_region_id)
+SELECT 'MP', 'Northern Mariana Islands', 'State', 'USA', c.region_id
+FROM region c WHERE c.region_type = 'Country' AND c.region_code = 'USA';
+
+INSERT INTO region (region_code, region_name, region_type, country_code, parent_region_id)
+SELECT 'AS', 'American Samoa', 'State', 'USA', c.region_id
+FROM region c WHERE c.region_type = 'Country' AND c.region_code = 'USA';
+
+
+ALSO DO FOR COUNTRIES AND STATES-PROVINCES
+
+
 ```
 
 *** Create table to store plant native states
