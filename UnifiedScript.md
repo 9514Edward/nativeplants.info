@@ -3,13 +3,10 @@ THE BASIC IDEA IS WE WILL NEED SOME COUNTRY SPECIFIC SOURCES, BUT WE WILL BRING 
 STARTING WITH MEXICO
 
 However we actually will start with U.S. Soil and Moisture data.
-First we need the U.S. plants as a cross reference file to load into GBIF:
 
-use nativeplants;
-SELECT
-    scientific_name_no_hybrid             AS gbif_scientific_name
-FROM powo_staging
-join plants on plants.powo_id = powo_staging.powo_id
-WHERE taxon_rank = 'Species'
-  AND taxon_status = 'Accepted'
-  AND scientific_name_no_hybrid IS NOT NULL;
+Soil datasource 1: https://www.gbif.org/occurrence/download?basis_of_record=HUMAN_OBSERVATION&basis_of_record=PRESERVED_SPECIMEN&has_coordinate=true&has_geospatial_issue=false&taxon_key=7707728&year=1954,2025&advanced=1&coordinate_uncertainty_in_meters=0,9040&occurrence_status=present
+We are going to infer the soil and climate from the geolocation coordinates.
+
+Soil datasource 2: TRY traits: 602, 600, 593, 761, 3410, 1138, 1140, 825, 1144, 30, 603, 1041, 229, 61
+
+Soil datasource 3: https://bien.nceas.ucsb.edu/bien/
