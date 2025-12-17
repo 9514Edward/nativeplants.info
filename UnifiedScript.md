@@ -12,4 +12,4 @@ Soil datasource 2: TRY traits: 602, 600, 593, 761, 3410, 1138, 1140, 825, 1144, 
 
 Soil datasource 3: https://bien.nceas.ucsb.edu/bien/
 
-Run script 
+Run script IntegrateSoilMoistureData.py
