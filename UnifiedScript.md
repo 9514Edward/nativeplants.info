@@ -21,3 +21,14 @@ Soil datasource 2: TRY traits: 602, 600, 593, 761, 3410, 1138, 1140, 825, 1144, 
 Soil datasource 3: https://bien.nceas.ucsb.edu/bien/
 
 Run script IntegrateSoilMoistureData.py
+
+Bien data for future use.:
+                         whole plant height 10167913
+                    whole plant growth form   330047
+          whole plant growth form diversity    67413
+                      whole plant woodiness    49060
+                 maximum whole plant height     3722
+              maximum whole plant longevity     1065
+              longest whole plant longevity      730
+                 minimum whole plant height      658
+ whole plant primary juvenile period length      375
