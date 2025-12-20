@@ -13,7 +13,7 @@ run_make_lant_images_in_batches.py
 However we actually will start with U.S. Soil and Moisture data.
 
 Soil datasource 1: https://www.gbif.org/occurrence/download?basis_of_record=HUMAN_OBSERVATION&basis_of_record=PRESERVED_SPECIMEN&has_coordinate=true&has_geospatial_issue=false&taxon_key=7707728&year=1954,2025&advanced=1&coordinate_uncertainty_in_meters=0,9040&occurrence_status=present
-We are going to infer the soil and climate from the geolocation coordinates.
+We are going to use this download for the basis if all new records to be added to my database.  We will infer the soil and climate from the geolocation coordinates.  Plus get other data as available.
 Download the file.  Extract the files.  Upload only occurrences file to S3.
 
 Soil datasource 2: TRY traits: 602, 600, 593, 761, 3410, 1138, 1140, 825, 1144, 30, 603, 1041, 229, 61
