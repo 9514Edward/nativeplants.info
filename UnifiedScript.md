@@ -5,10 +5,8 @@ STARTING WITH MEXICO
 Images:
 These 4 scripts need to be combined into one.
 
-run_wikipedia_top_images_RETRY.py
-resize_images.py
-plant_images_cleanup.py
-run_make_lant_images_in_batches.py
+UnifiedWikipediaPlantImagesScript.py
+run_make_plant_images_in_batches.py
 
 However we actually will start with U.S. Soil and Moisture data.
 
@@ -32,3 +30,12 @@ Bien data for future use.:
               longest whole plant longevity      730
                  minimum whole plant height      658
  whole plant primary juvenile period length      375
+
+ Associated Fauna images:  
+ PickWikepediaFaunaSaveImagesToS3.py
+ should be combined with
+ PickAndResizEWikepediaFaunaSaveImagesToS3.py
+
+  
+ call make_plant_caterpillars_country;
+ call make_GBIF_rankings;
