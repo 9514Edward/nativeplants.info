@@ -3,10 +3,9 @@ THE BASIC IDEA IS WE WILL NEED SOME COUNTRY SPECIFIC SOURCES, BUT WE WILL BRING 
 STARTING WITH MEXICO
 
 Images:
-These 4 scripts need to be combined into one.
-
 UnifiedWikipediaPlantImagesScript.py
 run_make_plant_images_in_batches.py
+
 
 However we actually will start with U.S. Soil and Moisture data.
 
